@@ -1,0 +1,18 @@
+{
+  "mode": "qwen",
+  "phase": "PHASE_RUNTIME_BUILD",
+  "blocker": "Trace unresolved sceCdRead request",
+  "command_text": "cmake --build output/build",
+  "log_path": "D:\\Repos\\Recomp\\PS2Recomp\\PS2_PROJECT_STATE.md",
+  "state_path": "D:\\Repos\\Recomp\\PS2Recomp\\PS2_PROJECT_STATE.md",
+  "relevant_files": [
+    "ps2xRuntime/src/lib/game_overrides.cpp",
+    "ps2xRuntime/src/lib/ps2_stubs.cpp"
+  ],
+  "outputs": {
+    "reduced_log": "D:\\Repos\\Recomp\\PS2Recomp\\tools\\ai\\artifacts\\py-demo\\reduced-log.txt",
+    "state_excerpt": "D:\\Repos\\Recomp\\PS2Recomp\\tools\\ai\\artifacts\\py-demo\\state-excerpt.md",
+    "qwen_prompt": "D:\\Repos\\Recomp\\PS2Recomp\\tools\\ai\\artifacts\\py-demo\\qwen-prepass-filled.txt",
+    "qwen_prompt_annotated": "D:\\Repos\\Recomp\\PS2Recomp\\tools\\ai\\artifacts\\py-demo\\qwen-prepass-annotated.md"
+  }
+}

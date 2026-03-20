@@ -4371,6 +4371,11 @@ void vfprintf(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     const std::string formatOwned = readPs2CStringBounded(rdram, runtime, format_addr, 1024);
     int ret = -1;
 
+    if (!fp && file_handle != 0u && getConstMemPtr(rdram, file_handle) != nullptr)
+    {
+        fp = stdout;
+    }
+
     if (fp && format_addr != 0)
     {
         std::string rendered = formatPs2StringWithVaList(rdram, runtime, formatOwned.c_str(), va_list_addr);

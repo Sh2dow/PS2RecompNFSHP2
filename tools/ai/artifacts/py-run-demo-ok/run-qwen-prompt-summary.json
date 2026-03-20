@@ -1,0 +1,27 @@
+{
+  "mode": "run-qwen",
+  "phase": "PHASE_RUNTIME_BUILD",
+  "blocker": "Trace unresolved sceCdRead request",
+  "command_text": "cmake --build output/build",
+  "log_path": "D:\\Repos\\Recomp\\PS2Recomp\\PS2_PROJECT_STATE.md",
+  "state_path": "D:\\Repos\\Recomp\\PS2Recomp\\PS2_PROJECT_STATE.md",
+  "relevant_files": [
+    "ps2xRuntime/src/lib/game_overrides.cpp",
+    "ps2xRuntime/src/lib/ps2_stubs.cpp"
+  ],
+  "outputs": {
+    "reduced_log": "D:\\Repos\\Recomp\\PS2Recomp\\tools\\ai\\artifacts\\py-run-demo-ok\\reduced-log.txt",
+    "state_excerpt": "D:\\Repos\\Recomp\\PS2Recomp\\tools\\ai\\artifacts\\py-run-demo-ok\\state-excerpt.md",
+    "qwen_prompt": "D:\\Repos\\Recomp\\PS2Recomp\\tools\\ai\\artifacts\\py-run-demo-ok\\qwen-prepass-filled.txt",
+    "qwen_prompt_annotated": "D:\\Repos\\Recomp\\PS2Recomp\\tools\\ai\\artifacts\\py-run-demo-ok\\qwen-prepass-annotated.md",
+    "stdout": "D:\\Repos\\Recomp\\PS2Recomp\\tools\\ai\\artifacts\\py-run-demo-ok\\qwen-stdout.txt",
+    "stderr": "D:\\Repos\\Recomp\\PS2Recomp\\tools\\ai\\artifacts\\py-run-demo-ok\\qwen-stderr.txt",
+    "exit_code": 0,
+    "executed_command": [
+      "python",
+      "-c",
+      "import json,sys; sys.stdin.read(); print(json.dumps({\"task_type\":\"build-triage\",\"root_errors\":[],\"downstream_noise\":[],\"likely_files\":[],\"candidate_actions\":[],\"do_not_do\":[],\"uncertainties\":[]}))"
+    ],
+    "qwen_json": "D:\\Repos\\Recomp\\PS2Recomp\\tools\\ai\\artifacts\\py-run-demo-ok\\qwen-triage.json"
+  }
+}

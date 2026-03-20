@@ -46,6 +46,7 @@ endif()
 add_subdirectory("ps2xRecomp")
 
 add_subdirectory("ps2xRuntime")
+add_subdirectory("output")
 
 add_subdirectory("ps2xAnalyzer")
 add_subdirectory("ps2xTest")

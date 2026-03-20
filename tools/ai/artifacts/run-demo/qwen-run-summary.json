@@ -1,0 +1,16 @@
+{
+  "executable": "powershell",
+  "arguments": [
+    "-NoProfile",
+    "-Command",
+    "Get-Content -Raw -LiteralPath \"D:\\Repos\\Recomp\\PS2Recomp\\tools\\ai\\artifacts\\demo2\\qwen-prepass-filled.txt\" | Out-Null; Write-Output \"{\"\"task_type\"\":\"\"build-triage\"\",\"\"root_errors\"\":[],\"\"downstream_noise\"\":[],\"\"likely_files\"\":[],\"\"candidate_actions\"\":[],\"\"do_not_do\"\":[],\"\"uncertainties\"\":[]}\""
+  ],
+  "prompt_mode": "file",
+  "prompt_path": "D:\\Repos\\Recomp\\PS2Recomp\\tools\\ai\\artifacts\\demo2\\qwen-prepass-filled.txt",
+  "exit_code": 0,
+  "outputs": {
+    "stdout": "D:\\Repos\\Recomp\\PS2Recomp\\tools\\ai\\artifacts\\run-demo\\qwen-stdout.txt",
+    "stderr": "D:\\Repos\\Recomp\\PS2Recomp\\tools\\ai\\artifacts\\run-demo\\qwen-stderr.txt",
+    "qwen_json": "D:\\Repos\\Recomp\\PS2Recomp\\tools\\ai\\artifacts\\run-demo\\qwen-triage.json"
+  }
+}

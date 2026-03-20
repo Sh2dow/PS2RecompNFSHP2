@@ -377,6 +377,11 @@ public:
     void run();
 
     using RecompiledFunction = void (*)(uint8_t *, R5900Context *, PS2Runtime *);
+    struct RegisteredFunctionEntry
+    {
+        uint32_t address = 0u;
+        RecompiledFunction func = nullptr;
+    };
 
     class GuestExecutionScope
     {
@@ -406,6 +411,7 @@ public:
     };
 
     void registerFunction(uint32_t address, RecompiledFunction func);
+    void finalizeFunctionTable();
     RecompiledFunction lookupFunction(uint32_t address);
     bool hasFunction(uint32_t address) const;
 
@@ -561,7 +567,7 @@ private:
     uint32_t m_asyncCallbackStackFloor = 0x01F00000u;
     uint32_t m_asyncCallbackStackTop = PS2_RAM_SIZE;
 
-    std::unordered_map<uint32_t, RecompiledFunction> m_functionTable;
+    std::vector<RegisteredFunctionEntry> m_functionTable;
     std::atomic<bool> m_stopRequested{false};
 
     // TODO remove this later

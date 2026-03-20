@@ -39,6 +39,32 @@ namespace ps2_syscalls
 {
 #include "syscalls/ps2_syscalls_interrupt.inl"
 #include "syscalls/ps2_syscalls_system.inl"
+    static void LegacyMonitorSyscall(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        (void)rdram;
+        (void)runtime;
+
+        static std::atomic<uint32_t> s_legacyMonitorLogCount{0};
+        const uint32_t callIndex = ++s_legacyMonitorLogCount;
+        if (callIndex <= 8u)
+        {
+            std::cerr << "[syscall 0x63] Treating legacy monitor call as unavailable."
+                      << " pc=0x" << std::hex << ctx->pc
+                      << " a0=0x" << getRegU32(ctx, 4)
+                      << " a1=0x" << getRegU32(ctx, 5)
+                      << " a2=0x" << getRegU32(ctx, 6)
+                      << " a3=0x" << getRegU32(ctx, 7)
+                      << std::dec << std::endl;
+        }
+        else if (callIndex == 9u)
+        {
+            std::cerr << "[syscall 0x63] Further legacy monitor logs suppressed" << std::endl;
+        }
+
+        // Alpha/dev monitor probing should fall back to the non-monitor path.
+        setReturnU32(ctx, 0u);
+    }
+
     void iDeleteSema(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime);
 
     bool dispatchNumericSyscall(uint32_t syscallNumber, uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
@@ -280,6 +306,9 @@ namespace ps2_syscalls
         case 0x5F:
         case static_cast<uint32_t>(-0x5F):
             DisableDmacHandler(rdram, ctx, runtime);
+            return true;
+        case 0x63:
+            LegacyMonitorSyscall(rdram, ctx, runtime);
             return true;
         case 0x64:
             FlushCache(rdram, ctx, runtime);

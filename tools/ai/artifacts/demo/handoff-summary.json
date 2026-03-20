@@ -1,0 +1,15 @@
+﻿{
+    "phase":  "PHASE_RUNTIME_BUILD",
+    "blocker":  "Trace unresolved sceCdRead request",
+    "command":  "cmake --build output/build",
+    "log_path":  "D:\\Repos\\Recomp\\PS2Recomp\\PS2_PROJECT_STATE.md",
+    "state_path":  "D:\\Repos\\Recomp\\PS2Recomp\\PS2_PROJECT_STATE.md",
+    "relevant_files":  [
+                           "ps2xRuntime/src/lib/game_overrides.cpp,ps2xRuntime/src/lib/ps2_stubs.cpp"
+                       ],
+    "outputs":  {
+                    "reduced_log":  "D:\\Repos\\Recomp\\PS2Recomp\\tools\\ai\\artifacts\\demo\\reduced-log.txt",
+                    "qwen_prompt":  "D:\\Repos\\Recomp\\PS2Recomp\\tools\\ai\\artifacts\\demo\\qwen-prepass-filled.txt",
+                    "state_excerpt":  "D:\\Repos\\Recomp\\PS2Recomp\\tools\\ai\\artifacts\\demo\\state-excerpt.md"
+                }
+}

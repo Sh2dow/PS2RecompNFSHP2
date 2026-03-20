@@ -20,9 +20,9 @@
 #include <mutex>
 #include <atomic>
 #include <limits>
+#include <algorithm>
 
 #include "raylib.h"
-#include "stubs/helpers/ps2_stubs_helpers.inl"
 
 namespace ps2_stubs
 {
@@ -212,6 +212,7 @@ namespace ps2_stubs
         }
     }
 
+#include "stubs/helpers/ps2_stubs_helpers.inl"
 #include "stubs/ps2_stubs_libc.inl"
 #include "stubs/ps2_stubs_ps2.inl"
 #include "stubs/ps2_stubs_misc.inl"
@@ -227,6 +228,120 @@ namespace ps2_stubs
     void TODO_NAMED(const char *name, uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     {
         const std::string stubName = name ? name : "unknown";
+
+        if (stubName == "__malloc_lock" ||
+            stubName == "__malloc_unlock" ||
+            stubName == "__malloc_update_mallinfo")
+        {
+            static std::atomic<uint32_t> s_mallocStubLogCount{0};
+            const uint32_t callIndex = ++s_mallocStubLogCount;
+            if (callIndex <= 8u)
+            {
+                std::cerr << "[stub] treating " << stubName << " as a no-op"
+                          << " pc=0x" << std::hex << ctx->pc
+                          << " ra=0x" << getRegU32(ctx, 31)
+                          << std::dec << std::endl;
+            }
+            else if (callIndex == 9u)
+            {
+                std::cerr << "[stub] further malloc helper no-op logs suppressed" << std::endl;
+            }
+
+            setReturnS32(ctx, 0);
+            return;
+        }
+
+        if (stubName == "__5bFilePCc9bFileTypeiPFP5bFileP10AsyncEntry_iT4")
+        {
+            const uint32_t thisAddr = getRegU32(ctx, 4);
+            if (uint8_t *fileObj = getMemPtr(rdram, thisAddr))
+            {
+                std::memset(fileObj, 0, 0x8Cu);
+
+                const uint32_t fileType = getRegU32(ctx, 6);
+                const uint32_t fileSize = getRegU32(ctx, 7);
+                const uint32_t asyncReadProc = getRegU32(ctx, 8);
+                const uint32_t asyncCloseProc = getRegU32(ctx, 9);
+                const uint32_t asyncIdleSentinel = ADD32(getRegU32(ctx, 28), 4294948200);
+
+                WRITE32(thisAddr + 0x6Cu, fileSize);
+                WRITE32(thisAddr + 0x70u, 0u);
+                WRITE32(thisAddr + 0x74u, asyncIdleSentinel);
+                WRITE32(thisAddr + 0x78u, fileType);
+                WRITE32(thisAddr + 0x7Cu, asyncReadProc);
+                WRITE32(thisAddr + 0x80u, asyncCloseProc);
+                WRITE32(thisAddr + 0x84u, 0u);
+                WRITE32(thisAddr + 0x88u, 0u);
+            }
+
+            setReturnU32(ctx, thisAddr);
+            return;
+        }
+
+        if (stubName == "__10AsyncEntryP5bFilePFP5bFileP10AsyncEntry_i")
+        {
+            const uint32_t thisAddr = getRegU32(ctx, 4);
+            const uint32_t fileAddr = getRegU32(ctx, 5);
+            const uint32_t procAddr = getRegU32(ctx, 6);
+
+            if (uint8_t *entryObj = getMemPtr(rdram, thisAddr))
+            {
+                std::memset(entryObj, 0, 0x38u);
+
+                // AsyncEntry is a bNode-derived queue record consumed by bServiceFileSystem.
+                // The list links are overwritten by the queue insertion path, but the
+                // function pointer and file ref must be initialized here.
+                WRITE32(thisAddr + 0x00u, thisAddr);
+                WRITE32(thisAddr + 0x04u, thisAddr);
+                WRITE32(thisAddr + 0x08u, fileAddr);
+                WRITE32(thisAddr + 0x0Cu, 0u);
+                WRITE32(thisAddr + 0x10u, 0u);
+                WRITE32(thisAddr + 0x14u, 0u);
+                WRITE32(thisAddr + 0x18u, 0u);
+                WRITE32(thisAddr + 0x1Cu, 0u);
+                WRITE32(thisAddr + 0x20u, 0u);
+                WRITE32(thisAddr + 0x24u, 0u);
+                WRITE32(thisAddr + 0x28u, 0u);
+                WRITE32(thisAddr + 0x2Cu, 0u);
+                WRITE32(thisAddr + 0x30u, 0u);
+                WRITE32(thisAddr + 0x34u, procAddr);
+            }
+
+            if (fileAddr != 0u)
+            {
+                uint8_t *fileObj = getMemPtr(rdram, fileAddr);
+                if (fileObj != nullptr)
+                {
+                    const uint32_t pendingCount = READ32(fileAddr + 0x74u);
+                    WRITE32(fileAddr + 0x74u, pendingCount + 1u);
+                }
+            }
+
+            setReturnU32(ctx, thisAddr);
+            return;
+        }
+
+        if (stubName == "sceDevVu0Reset" ||
+            stubName == "sceDevVu1Pause" ||
+            stubName == "sceDevVu1Reset")
+        {
+            static std::atomic<uint32_t> s_vuDevStubLogCount{0};
+            const uint32_t callIndex = ++s_vuDevStubLogCount;
+            if (callIndex <= 8u)
+            {
+                std::cerr << "[stub] treating " << stubName << " as a no-op"
+                          << " pc=0x" << std::hex << ctx->pc
+                          << " ra=0x" << getRegU32(ctx, 31)
+                          << std::dec << std::endl;
+            }
+            else if (callIndex == 9u)
+            {
+                std::cerr << "[stub] further VU dev-helper no-op logs suppressed" << std::endl;
+            }
+
+            setReturnS32(ctx, 0);
+            return;
+        }
 
         uint32_t callCount = 0;
         {

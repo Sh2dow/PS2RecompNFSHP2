@@ -28,6 +28,7 @@ namespace ps2_stubs
 #define ET_EXEC 2            // Executable file
 #define EM_MIPS 8            // MIPS architecture
 #define PT_LOAD 1            // Loadable segment
+#define PT_MIPS_REGINFO 0x70000000u
 
 static constexpr int FB_WIDTH = 640;
 static constexpr int FB_HEIGHT = 448;
@@ -74,7 +75,7 @@ namespace
     constexpr uint32_t kGuestHeapDefaultBase = 0x00100000u;
     constexpr uint32_t kGuestHeapDefaultAlignment = 16u;
     constexpr uint32_t kGuestHeapSafetyPad = 0x1000u;
-    constexpr uint32_t kGuestHeapHardLimit = 0x01F00000u;
+    constexpr uint32_t kGuestHeapHardLimit = PS2_RAM_SIZE;
 
     constexpr uint32_t COP0_CAUSE_EXCCODE_MASK = 0x0000007Cu;
     constexpr uint32_t COP0_CAUSE_BD = 0x80000000u;
@@ -647,6 +648,7 @@ PS2Runtime::PS2Runtime()
     // Stack pointer (SP) and global pointer (GP) will be set by the loaded ELF
 
     m_functionTable.clear();
+    m_functionTable.reserve(16384u);
 
     m_loadedModules.clear();
     m_guestHeapBlocks.clear();
@@ -675,37 +677,68 @@ PS2Runtime::~PS2Runtime()
 
 bool PS2Runtime::initialize(const char *title)
 {
+    auto appendInitTrace = [](const char *stage)
+    {
+        std::ofstream trace("ps2_init_trace.txt", std::ios::out | std::ios::app);
+        if (trace)
+        {
+            trace << stage << '\n';
+        }
+    };
+
+    appendInitTrace("initialize:enter");
     if (!m_memory.initialize())
     {
+        appendInitTrace("initialize:m_memory.initialize failed");
         std::cerr << "Failed to initialize PS2 memory" << std::endl;
         return false;
     }
+    appendInitTrace("initialize:after m_memory.initialize");
 
     m_gs.init(m_memory.getGSVRAM(), static_cast<uint32_t>(PS2_GS_VRAM_SIZE), &m_memory.gs());
+    appendInitTrace("initialize:after m_gs.init");
     m_gs.reset();
+    appendInitTrace("initialize:after m_gs.reset");
     m_gifArbiter.setProcessPacketFn([this](const uint8_t *data, uint32_t size)
                                     { m_gs.processGIFPacket(data, size); });
+    appendInitTrace("initialize:after m_gifArbiter.setProcessPacketFn");
     m_memory.setGifArbiter(&m_gifArbiter);
+    appendInitTrace("initialize:after m_memory.setGifArbiter");
     m_memory.setVu1MscalCallback([this](uint32_t startPC, uint32_t itop)
                                  { m_vu1.execute(m_memory.getVU1Code(), PS2_VU1_CODE_SIZE,
                                                  m_memory.getVU1Data(), PS2_VU1_DATA_SIZE,
                                                  m_gs, &m_memory, startPC, itop, 65536); });
+    appendInitTrace("initialize:after m_memory.setVu1MscalCallback");
     m_memory.setVu1MscntCallback([this](uint32_t itop)
                                  { m_vu1.resume(m_memory.getVU1Code(), PS2_VU1_CODE_SIZE,
                                                 m_memory.getVU1Data(), PS2_VU1_DATA_SIZE,
                                                 m_gs, &m_memory, itop, 65536); });
+    appendInitTrace("initialize:after m_memory.setVu1MscntCallback");
 
     m_iop.init(m_memory.getRDRAM());
+    appendInitTrace("initialize:after m_iop.init");
     m_iop.reset();
+    appendInitTrace("initialize:after m_iop.reset");
 
     SetConfigFlags(FLAG_WINDOW_RESIZABLE);
+    appendInitTrace("initialize:after SetConfigFlags");
     InitWindow(FB_WIDTH, FB_HEIGHT, title);
+    appendInitTrace("initialize:after InitWindow");
     InitAudioDevice();
+    appendInitTrace("initialize:after InitAudioDevice");
     m_audioBackend.setAudioReady(IsAudioDeviceReady());
+    appendInitTrace("initialize:after m_audioBackend.setAudioReady");
     SetTargetFPS(60);
+    appendInitTrace("initialize:after SetTargetFPS");
 
     m_vu1.reset();
+    appendInitTrace("initialize:after m_vu1.reset");
+    m_functionTable.push_back({0u, nullptr});
+    appendInitTrace("initialize:after function-table self-test push");
+    m_functionTable.clear();
+    appendInitTrace("initialize:after function-table self-test clear");
 
+    appendInitTrace("initialize:return true");
     return true;
 }
 
@@ -771,6 +804,43 @@ bool PS2Runtime::loadELF(const std::string &elfPath)
 
     m_cpuContext.pc = header.entry;
     m_debugPc.store(m_cpuContext.pc, std::memory_order_relaxed);
+
+    for (uint16_t i = 0; i < header.phnum; ++i)
+    {
+        const uint64_t phOffset =
+            static_cast<uint64_t>(header.phoff) +
+            static_cast<uint64_t>(i) * static_cast<uint64_t>(header.phentsize);
+        if (phOffset + sizeof(ProgramHeader) > static_cast<uint64_t>(fileSize))
+        {
+            break;
+        }
+
+        ProgramHeader ph{};
+        file.seekg(static_cast<std::streamoff>(phOffset), std::ios::beg);
+        if (!file.read(reinterpret_cast<char *>(&ph), sizeof(ph)))
+        {
+            break;
+        }
+
+        if (ph.type != PT_MIPS_REGINFO || ph.filesz < 24u)
+        {
+            continue;
+        }
+
+        uint8_t regInfo[24] = {};
+        file.seekg(static_cast<std::streamoff>(ph.offset), std::ios::beg);
+        if (!file.read(reinterpret_cast<char *>(regInfo), sizeof(regInfo)))
+        {
+            break;
+        }
+
+        uint32_t gpValue = 0u;
+        std::memcpy(&gpValue, regInfo + 20u, sizeof(gpValue));
+        m_cpuContext.r[28] = _mm_set_epi64x(0, static_cast<int64_t>(gpValue));
+        m_debugGp.store(gpValue, std::memory_order_relaxed);
+        std::cout << "ELF GP value: 0x" << std::hex << gpValue << std::dec << std::endl;
+        break;
+    }
 
     uint32_t maxLoadedRdramEnd = kGuestHeapDefaultBase;
     uint32_t moduleBase = std::numeric_limits<uint32_t>::max();
@@ -981,6 +1051,9 @@ void PS2Runtime::setIoPaths(const IoPaths &paths)
 void PS2Runtime::configureIoPathsFromElf(const std::string &elfPath)
 {
     IoPaths paths = runtimeIoPaths();
+    const bool hadHostRoot = !paths.hostRoot.empty();
+    const bool hadCdRoot = !paths.cdRoot.empty();
+    const bool hadMcRoot = !paths.mcRoot.empty();
     paths.elfPath = normalizeAbsolutePath(std::filesystem::path(elfPath));
     if (!paths.elfPath.empty())
     {
@@ -989,9 +1062,18 @@ void PS2Runtime::configureIoPathsFromElf(const std::string &elfPath)
 
     if (!paths.elfDirectory.empty())
     {
-        paths.hostRoot = paths.elfDirectory;
-        paths.cdRoot = paths.elfDirectory;
-        paths.mcRoot = paths.elfDirectory / "mc0";
+        if (!hadHostRoot)
+        {
+            paths.hostRoot = paths.elfDirectory;
+        }
+        if (!hadCdRoot)
+        {
+            paths.cdRoot = paths.elfDirectory;
+        }
+        if (!hadMcRoot)
+        {
+            paths.mcRoot = paths.elfDirectory / "mc0";
+        }
     }
 
     setIoPaths(paths);
@@ -999,21 +1081,47 @@ void PS2Runtime::configureIoPathsFromElf(const std::string &elfPath)
 
 void PS2Runtime::registerFunction(uint32_t address, RecompiledFunction func)
 {
-    m_functionTable[address] = func;
+    std::ofstream trace("ps2_register_trace.txt", std::ios::out | std::ios::app);
+    if (trace)
+    {
+        trace << "before push address=0x" << std::hex << address
+              << " func=0x" << reinterpret_cast<uintptr_t>(func)
+              << " size=" << std::dec << m_functionTable.size() << '\n';
+        trace.flush();
+    }
+    m_functionTable.push_back({address, func});
+    if (trace)
+    {
+        trace << "after push address=0x" << std::hex << address
+              << " size=" << std::dec << m_functionTable.size() << '\n';
+    }
+}
+
+void PS2Runtime::finalizeFunctionTable()
+{
+    std::sort(m_functionTable.begin(), m_functionTable.end(),
+              [](const RegisteredFunctionEntry &lhs, const RegisteredFunctionEntry &rhs)
+              { return lhs.address < rhs.address; });
 }
 
 bool PS2Runtime::hasFunction(uint32_t address) const
 {
-    auto it = m_functionTable.find(address);
-    if (it != m_functionTable.end())
+    auto it = std::lower_bound(
+        m_functionTable.begin(), m_functionTable.end(), address,
+        [](const RegisteredFunctionEntry &entry, uint32_t candidate)
+        { return entry.address < candidate; });
+    if (it != m_functionTable.end() && it->address == address)
     {
         return true;
     }
 
     if (address == 0x2913E4u)
     {
-        auto parent = m_functionTable.find(0x2913B0u);
-        return parent != m_functionTable.end();
+        auto parent = std::lower_bound(
+            m_functionTable.begin(), m_functionTable.end(), 0x2913B0u,
+            [](const RegisteredFunctionEntry &entry, uint32_t candidate)
+            { return entry.address < candidate; });
+        return parent != m_functionTable.end() && parent->address == 0x2913B0u;
     }
 
     return false;
@@ -1023,18 +1131,24 @@ PS2Runtime::RecompiledFunction PS2Runtime::lookupFunction(uint32_t address)
 {
     pushDispatchPc(address);
 
-    auto it = m_functionTable.find(address);
-    if (it != m_functionTable.end())
+    auto it = std::lower_bound(
+        m_functionTable.begin(), m_functionTable.end(), address,
+        [](const RegisteredFunctionEntry &entry, uint32_t candidate)
+        { return entry.address < candidate; });
+    if (it != m_functionTable.end() && it->address == address)
     {
-        return it->second;
+        return it->func;
     }
 
     if (address == 0x2913E4u)
     {
-        auto parent = m_functionTable.find(0x2913B0u);
-        if (parent != m_functionTable.end())
+        auto parent = std::lower_bound(
+            m_functionTable.begin(), m_functionTable.end(), 0x2913B0u,
+            [](const RegisteredFunctionEntry &entry, uint32_t candidate)
+            { return entry.address < candidate; });
+        if (parent != m_functionTable.end() && parent->address == 0x2913B0u)
         {
-            return parent->second;
+            return parent->func;
         }
     }
 
@@ -2090,6 +2204,11 @@ void PS2Runtime::run()
         gameThreadFinished.store(true, std::memory_order_release); });
 
     uint64_t tick = 0;
+    uint32_t lastTickPc = 0u;
+    uint32_t lastTickRa = 0u;
+    uint32_t lastTickSp = 0u;
+    uint32_t lastTickGp = 0u;
+    uint64_t stableTickCount = 0u;
     while (!isStopRequested() && g_activeThreads.load(std::memory_order_relaxed) > 0)
     {
         tick++;
@@ -2142,6 +2261,37 @@ void PS2Runtime::run()
             {
                 sndBankSeCheck = readGuestS16(kSndSeCheckAddr + (sndTransBank * 2u));
             }
+            const bool sameRegs =
+                (dbgPc == lastTickPc) &&
+                (dbgRa == lastTickRa) &&
+                (dbgSp == lastTickSp) &&
+                (dbgGp == lastTickGp);
+            stableTickCount = sameRegs ? (stableTickCount + 120u) : 0u;
+
+            if (!sameRegs)
+            {
+                std::cout << "[run:pc-change] tick=" << tick
+                          << " from pc=0x" << std::hex << lastTickPc
+                          << " ra=0x" << lastTickRa
+                          << " sp=0x" << lastTickSp
+                          << " gp=0x" << lastTickGp
+                          << " -> pc=0x" << dbgPc
+                          << " ra=0x" << dbgRa
+                          << " sp=0x" << dbgSp
+                          << " gp=0x" << dbgGp
+                          << std::dec << std::endl;
+            }
+            else if (stableTickCount >= 480u)
+            {
+                std::cout << "[run:pc-stable] tick=" << tick
+                          << " stableFor=" << stableTickCount
+                          << " pc=0x" << std::hex << dbgPc
+                          << " ra=0x" << dbgRa
+                          << " sp=0x" << dbgSp
+                          << " gp=0x" << dbgGp
+                          << std::dec << std::endl;
+            }
+
             std::cout << "[run:tick] tick=" << tick
                       << " pc=0x" << std::hex << dbgPc
                       << " ra=0x" << dbgRa
@@ -2164,6 +2314,11 @@ void PS2Runtime::run()
                       << " sndChkMidi=" << sndBankMidiCheck
                       << " sndChkSe=" << sndBankSeCheck
                       << std::endl;
+
+            lastTickPc = dbgPc;
+            lastTickRa = dbgRa;
+            lastTickSp = dbgSp;
+            lastTickGp = dbgGp;
         }
         UploadFrame(frameTex, this);
 
