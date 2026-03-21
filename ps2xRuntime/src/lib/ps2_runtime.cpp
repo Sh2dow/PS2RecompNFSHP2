@@ -1082,6 +1082,9 @@ void PS2Runtime::configureIoPathsFromElf(const std::string &elfPath)
 void PS2Runtime::registerFunction(uint32_t address, RecompiledFunction func)
 {
     std::ofstream trace("ps2_register_trace.txt", std::ios::out | std::ios::app);
+    const bool needsResort =
+        !m_functionTable.empty() &&
+        m_functionTable.back().address > address;
     if (trace)
     {
         trace << "before push address=0x" << std::hex << address
@@ -1090,6 +1093,17 @@ void PS2Runtime::registerFunction(uint32_t address, RecompiledFunction func)
         trace.flush();
     }
     m_functionTable.push_back({address, func});
+    if (needsResort)
+    {
+        std::sort(m_functionTable.begin(), m_functionTable.end(),
+                  [](const RegisteredFunctionEntry &lhs, const RegisteredFunctionEntry &rhs)
+                  { return lhs.address < rhs.address; });
+        if (trace)
+        {
+            trace << "resorted function table after late registration for address=0x"
+                  << std::hex << address << '\n';
+        }
+    }
     if (trace)
     {
         trace << "after push address=0x" << std::hex << address

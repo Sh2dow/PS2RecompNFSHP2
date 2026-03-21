@@ -1041,6 +1041,7 @@ namespace ps2_game_overrides
 
         if (descriptors.empty())
         {
+            std::cout << "[game_overrides] no registered descriptors" << std::endl;
             return;
         }
 
@@ -1048,6 +1049,10 @@ namespace ps2_game_overrides
         uint32_t fileCrc32 = 0u;
         bool fileCrcComputed = false;
         bool fileCrcValid = false;
+
+        std::cout << "[game_overrides] probe elf='" << elfName
+                  << "' entry=0x" << std::hex << entry << std::dec
+                  << " descriptors=" << descriptors.size() << std::endl;
 
         size_t appliedCount = 0;
         for (const Descriptor &descriptor : descriptors)
@@ -1099,6 +1104,11 @@ namespace ps2_game_overrides
         if (appliedCount > 0)
         {
             std::cout << "[game_overrides] applied " << appliedCount << " matching override(s)." << std::endl;
+        }
+        else
+        {
+            std::cout << "[game_overrides] no matching overrides for elf='" << elfName
+                      << "' entry=0x" << std::hex << entry << std::dec << std::endl;
         }
     }
 }

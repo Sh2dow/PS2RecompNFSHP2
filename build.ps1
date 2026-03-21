@@ -144,7 +144,9 @@ function Invoke-GameRun([string]$RunElfPath, [string]$RunExePath, [bool]$ShouldT
         $RunExePath = Join-Path $repoRoot "output\Debug\ps2_game.exe"
     }
 
-    $logPath = Join-Path (Split-Path -Parent $RunExePath) "ps2_log.txt"
+    $exeDir = Split-Path -Parent $RunExePath
+    $logPath = Join-Path $exeDir "ps2_log.txt"
+    $rawLogPath = Join-Path $exeDir "raw_log.txt"
 
     if (-not (Test-Path $RunExePath)) {
         throw "Missing executable: $RunExePath"
@@ -153,12 +155,47 @@ function Invoke-GameRun([string]$RunElfPath, [string]$RunExePath, [bool]$ShouldT
     Write-Host "[run] exe=$RunExePath"
     Write-Host "[run] elf=$RunElfPath"
     Write-Host "[run] ps2Log=$logPath"
+    Write-Host "[run] rawLog=$rawLogPath"
 
     if (Test-Path $logPath) {
         Remove-Item $logPath -Force
     }
 
-    $proc = Start-Process -FilePath $RunExePath -ArgumentList $RunElfPath -PassThru
+    if (Test-Path $rawLogPath) {
+        Remove-Item $rawLogPath -Force
+    }
+
+    if (-not $ShouldNoWait -and -not $ShouldTailLog) {
+        $stdoutPath = Join-Path $exeDir "stdout.log"
+        $stderrPath = Join-Path $exeDir "stderr.log"
+        if (Test-Path $stdoutPath) {
+            Remove-Item $stdoutPath -Force
+        }
+        if (Test-Path $stderrPath) {
+            Remove-Item $stderrPath -Force
+        }
+
+        Push-Location $exeDir
+        try {
+            $proc = Start-Process -FilePath $RunExePath `
+                                  -ArgumentList $RunElfPath `
+                                  -WorkingDirectory $exeDir `
+                                  -RedirectStandardOutput $stdoutPath `
+                                  -RedirectStandardError $stderrPath `
+                                  -PassThru `
+                                  -Wait
+
+            $stdoutLines = if (Test-Path $stdoutPath) { Get-Content $stdoutPath } else { @() }
+            $stderrLines = if (Test-Path $stderrPath) { Get-Content $stderrPath } else { @() }
+            @($stdoutLines + $stderrLines) | Set-Content -Path $rawLogPath
+            return $proc.ExitCode
+        }
+        finally {
+            Pop-Location
+        }
+    }
+
+    $proc = Start-Process -FilePath $RunExePath -ArgumentList $RunElfPath -WorkingDirectory $exeDir -PassThru
     Write-Host "[run] pid=$($proc.Id)"
 
     if ($ShouldTailLog) {
