@@ -20,7 +20,9 @@
 #include <vector>
 
 void BeginRead__10QueuedFile_0x181d20(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime);
+void ServiceQueuedFiles__Fv_0x181e10(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime);
 void bServiceFileSystem__Fv_0x1f8ae8(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime);
+void GetLoadedTexture__11TexturePackUi_0x180b30(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime);
 
 namespace ps2_stubs
 {
@@ -64,6 +66,10 @@ namespace
         return true;
     }
 
+    constexpr uint32_t kPs2RdramSize = 0x02000000u;
+    constexpr uint32_t kTextureInfoStride = 0xA0u;
+    constexpr uint32_t kMaxReasonableTextureEntryCount = 0x20000u;
+
     std::string basenameFromPath(const std::string &path)
     {
         std::error_code ec;
@@ -74,6 +80,141 @@ namespace
             return path;
         }
         return leaf.string();
+    }
+
+    struct TexturePackIndexCache
+    {
+        uint32_t packAddr = 0u;
+        uint32_t tableAddr = 0u;
+        uint32_t entryCount = 0u;
+        std::unordered_map<uint32_t, std::vector<uint32_t>> entriesByTextureId;
+    };
+
+    std::optional<TexturePackIndexCache> &texturePackIndexCache()
+    {
+        static std::optional<TexturePackIndexCache> cache;
+        return cache;
+    }
+
+    uint32_t readGuestU32Raw(uint8_t *rdram, uint32_t addr)
+    {
+        const uint32_t masked = addr & PS2_RAM_MASK;
+        return static_cast<uint32_t>(rdram[masked + 0]) |
+               (static_cast<uint32_t>(rdram[masked + 1]) << 8) |
+               (static_cast<uint32_t>(rdram[masked + 2]) << 16) |
+               (static_cast<uint32_t>(rdram[masked + 3]) << 24);
+    }
+
+    bool buildTexturePackIndex(uint8_t *rdram,
+                               uint32_t packAddr,
+                               uint32_t tableAddr,
+                               uint32_t entryCount,
+                               TexturePackIndexCache &cache)
+    {
+        if (!rdram || packAddr == 0u || tableAddr == 0u)
+        {
+            return false;
+        }
+
+        if (entryCount == 0u || entryCount > kMaxReasonableTextureEntryCount)
+        {
+            return false;
+        }
+
+        const uint64_t tableEnd = static_cast<uint64_t>(tableAddr) +
+                                  (static_cast<uint64_t>(entryCount) * kTextureInfoStride);
+        if (tableAddr >= kPs2RdramSize || tableEnd > kPs2RdramSize)
+        {
+            return false;
+        }
+
+        cache.packAddr = packAddr;
+        cache.tableAddr = tableAddr;
+        cache.entryCount = entryCount;
+        cache.entriesByTextureId.clear();
+        cache.entriesByTextureId.reserve(entryCount);
+
+        for (uint32_t i = 0; i < entryCount; ++i)
+        {
+            const uint32_t entryAddr = tableAddr + (i * kTextureInfoStride);
+            const uint32_t textureId = readGuestU32Raw(rdram, entryAddr + 0x20u);
+            cache.entriesByTextureId[textureId].push_back(entryAddr);
+        }
+
+        return true;
+    }
+
+    bool tryLookupLoadedTextureFast(uint8_t *rdram,
+                                    uint32_t packAddr,
+                                    uint32_t textureId,
+                                    uint32_t &resultAddr)
+    {
+        if (!rdram || packAddr == 0u)
+        {
+            return false;
+        }
+
+        const uint32_t tableAddr = readGuestU32Raw(rdram, packAddr + 0x60u);
+        const uint32_t entryCount = readGuestU32Raw(rdram, packAddr + 0x64u);
+        if (tableAddr == 0u || tableAddr == 0xFFFFFFFFu || entryCount == 0u)
+        {
+            resultAddr = 0u;
+            return true;
+        }
+
+        auto &cacheOpt = texturePackIndexCache();
+        if (!cacheOpt.has_value() ||
+            cacheOpt->packAddr != packAddr ||
+            cacheOpt->tableAddr != tableAddr ||
+            cacheOpt->entryCount != entryCount)
+        {
+            TexturePackIndexCache rebuilt;
+            if (!buildTexturePackIndex(rdram, packAddr, tableAddr, entryCount, rebuilt))
+            {
+                return false;
+            }
+
+            static uint32_t s_textureIndexLogCount = 0u;
+            if (s_textureIndexLogCount < 12u)
+            {
+                std::cerr << "[nfs-hp2-alpha] indexed TexturePack"
+                          << " pack=0x" << std::hex << packAddr
+                          << " table=0x" << tableAddr
+                          << " count=0x" << entryCount
+                          << " uniqueIds=0x" << rebuilt.entriesByTextureId.size()
+                          << std::dec << std::endl;
+                ++s_textureIndexLogCount;
+            }
+
+            cacheOpt = std::move(rebuilt);
+        }
+
+        const auto found = cacheOpt->entriesByTextureId.find(textureId);
+        if (found == cacheOpt->entriesByTextureId.end())
+        {
+            resultAddr = 0u;
+            return true;
+        }
+
+        for (const uint32_t entryAddr : found->second)
+        {
+            const uint32_t field8c = readGuestU32Raw(rdram, entryAddr + 0x8Cu);
+            if (field8c == 0u)
+            {
+                continue;
+            }
+
+            const uint32_t field3c = readGuestU32Raw(rdram, entryAddr + 0x3Cu);
+            const uint32_t field90 = readGuestU32Raw(rdram, entryAddr + 0x90u);
+            if (field3c == 0u || field90 != 0u)
+            {
+                resultAddr = entryAddr;
+                return true;
+            }
+        }
+
+        resultAddr = 0u;
+        return true;
     }
 
     uint32_t readLeU32(const uint8_t *src)
@@ -1322,6 +1463,10 @@ label_1fa834:
         {
             return readLeU32(rdram + (addr & PS2_RAM_MASK));
         };
+        const auto writeGuestU32 = [&](uint32_t addr, uint32_t value)
+        {
+            writeLeU32(rdram + (addr & PS2_RAM_MASK), value);
+        };
         const auto readGuestCString = [&](uint32_t addr, size_t maxLen) -> std::string
         {
             std::string out;
@@ -1337,6 +1482,50 @@ label_1fa834:
             }
             return out;
         };
+        const auto normalizeAsyncEntryQueue = [&]()
+        {
+            const uint32_t sentinel = ADD32(getRegU32(ctx, 28), 4294948200u);
+            uint32_t head = readGuestU32(sentinel + 0x0u);
+            uint32_t tail = readGuestU32(sentinel + 0x4u);
+            bool repaired = false;
+
+            const bool headLooksBroken = (head == 0u);
+            const bool tailLooksBroken = (tail == 0u);
+
+            if (headLooksBroken && tailLooksBroken)
+            {
+                writeGuestU32(sentinel + 0x0u, sentinel);
+                writeGuestU32(sentinel + 0x4u, sentinel);
+                repaired = true;
+            }
+            else
+            {
+                if (tailLooksBroken)
+                {
+                    tail = sentinel;
+                    writeGuestU32(sentinel + 0x4u, tail);
+                    repaired = true;
+                }
+
+                if (headLooksBroken)
+                {
+                    const uint32_t recoveredHead = (tail != sentinel) ? tail : sentinel;
+                    writeGuestU32(sentinel + 0x0u, recoveredHead);
+                    repaired = true;
+                }
+            }
+
+            if (repaired)
+            {
+                std::cerr << "[nfs-hp2-alpha] repaired async-entry queue before BeginRead"
+                          << " sentinel=0x" << std::hex << sentinel
+                          << " head=0x" << readGuestU32(sentinel + 0x0u)
+                          << " tail=0x" << readGuestU32(sentinel + 0x4u)
+                          << std::dec << std::endl;
+            }
+        };
+
+        normalizeAsyncEntryQueue();
 
         const std::string path = readGuestCString(queuedFile + 0x0Cu, 0x30u);
         const bool watchPath = equalsIgnoreCaseAscii(path, "GLOBAL\\DYNTEX.BIN");
@@ -1390,8 +1579,52 @@ label_1fa834:
         {
             return readLeU32(rdram + (addr & PS2_RAM_MASK));
         };
+        const auto writeGuestU32 = [&](uint32_t addr, uint32_t value)
+        {
+            writeLeU32(rdram + (addr & PS2_RAM_MASK), value);
+        };
         const uint32_t queueSentinelAddr = ADD32(getRegU32(ctx, 28), 4294948200u);
         const uint32_t sentinel = queueSentinelAddr;
+        const auto normalizeAsyncEntryQueue = [&]()
+        {
+            uint32_t head = readGuestU32(queueSentinelAddr + 0x0u);
+            uint32_t tail = readGuestU32(queueSentinelAddr + 0x4u);
+            bool repaired = false;
+
+            if (head == 0u && tail == 0u)
+            {
+                writeGuestU32(queueSentinelAddr + 0x0u, sentinel);
+                writeGuestU32(queueSentinelAddr + 0x4u, sentinel);
+                repaired = true;
+            }
+            else
+            {
+                if (tail == 0u)
+                {
+                    tail = sentinel;
+                    writeGuestU32(queueSentinelAddr + 0x4u, tail);
+                    repaired = true;
+                }
+
+                if (head == 0u)
+                {
+                    const uint32_t recoveredHead = (tail != sentinel) ? tail : sentinel;
+                    writeGuestU32(queueSentinelAddr + 0x0u, recoveredHead);
+                    repaired = true;
+                }
+            }
+
+            if (repaired)
+            {
+                std::cerr << "[nfs-hp2-alpha] repaired async-entry queue before bServiceFileSystem"
+                          << " sentinel=0x" << std::hex << sentinel
+                          << " head=0x" << readGuestU32(queueSentinelAddr + 0x0u)
+                          << " tail=0x" << readGuestU32(queueSentinelAddr + 0x4u)
+                          << std::dec << std::endl;
+            }
+        };
+
+        normalizeAsyncEntryQueue();
 
         auto logEntry = [&](const char *tag)
         {
@@ -1463,6 +1696,153 @@ label_1fa834:
         logEntry("after");
     }
 
+    void nfsHp2AlphaServiceQueuedFiles(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        if (!rdram || !ctx || !runtime)
+        {
+            if (runtime)
+            {
+                runtime->requestStop();
+            }
+            return;
+        }
+
+        const auto readGuestU32 = [&](uint32_t addr) -> uint32_t
+        {
+            return readLeU32(rdram + (addr & PS2_RAM_MASK));
+        };
+        const auto writeGuestU32 = [&](uint32_t addr, uint32_t value)
+        {
+            writeLeU32(rdram + (addr & PS2_RAM_MASK), value);
+        };
+
+        const uint32_t sentinel = ADD32(getRegU32(ctx, 28), 4294944800u);
+        uint32_t head = readGuestU32(sentinel + 0x0u);
+        uint32_t tail = readGuestU32(sentinel + 0x4u);
+        bool repaired = false;
+
+        if (head == 0u && tail == 0u)
+        {
+            writeGuestU32(sentinel + 0x0u, sentinel);
+            writeGuestU32(sentinel + 0x4u, sentinel);
+            repaired = true;
+        }
+        else
+        {
+            if (tail == 0u)
+            {
+                tail = sentinel;
+                writeGuestU32(sentinel + 0x4u, tail);
+                repaired = true;
+            }
+
+            if (head == 0u)
+            {
+                const uint32_t recoveredHead = (tail != sentinel) ? tail : sentinel;
+                writeGuestU32(sentinel + 0x0u, recoveredHead);
+                repaired = true;
+            }
+        }
+
+        if (repaired)
+        {
+            std::cerr << "[nfs-hp2-alpha] repaired queued-file queue before ServiceQueuedFiles"
+                      << " sentinel=0x" << std::hex << sentinel
+                      << " head=0x" << readGuestU32(sentinel + 0x0u)
+                      << " tail=0x" << readGuestU32(sentinel + 0x4u)
+                      << std::dec << std::endl;
+        }
+
+        const uint32_t currentHead = readGuestU32(sentinel + 0x0u);
+        if (currentHead != 0u && currentHead != sentinel)
+        {
+            std::cerr << "[nfs-hp2-alpha] ServiceQueuedFiles head=0x" << std::hex << currentHead
+                      << " next=0x" << readGuestU32(currentHead + 0x0u)
+                      << " prev=0x" << readGuestU32(currentHead + 0x4u)
+                      << " target=0x" << readGuestU32(currentHead + 0x08u)
+                      << " prio=0x" << readGuestU32(currentHead + 0x4Cu)
+                      << " cb=0x" << readGuestU32(currentHead + 0x50u)
+                      << " state5c=0x" << readGuestU32(currentHead + 0x5Cu)
+                      << " state60=0x" << readGuestU32(currentHead + 0x60u)
+                      << std::dec << std::endl;
+        }
+
+        const uint32_t entryPc = ctx->pc;
+        ServiceQueuedFiles__Fv_0x181e10(rdram, ctx, runtime);
+        if (ctx->pc == entryPc)
+        {
+            ctx->pc = getRegU32(ctx, 31);
+        }
+    }
+
+    void nfsHp2AlphaGetLoadedTexture(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        if (!rdram || !ctx || !runtime)
+        {
+            if (runtime)
+            {
+                runtime->requestStop();
+            }
+            return;
+        }
+
+        const uint32_t entryPc = ctx->pc;
+        const uint32_t packAddr = getRegU32(ctx, 4);
+        const uint32_t textureId = getRegU32(ctx, 5);
+        static uint32_t s_entryLogCount = 0u;
+        if (s_entryLogCount < 16u)
+        {
+            std::cerr << "[nfs-hp2-alpha] enter GetLoadedTexture override"
+                      << " pack=0x" << std::hex << packAddr
+                      << " texture=0x" << textureId
+                      << " table=0x" << readGuestU32Raw(rdram, packAddr + 0x60u)
+                      << " count=0x" << readGuestU32Raw(rdram, packAddr + 0x64u)
+                      << " entryPc=0x" << entryPc
+                      << " ra=0x" << getRegU32(ctx, 31)
+                      << std::dec << std::endl;
+            ++s_entryLogCount;
+        }
+
+        uint32_t resultAddr = 0u;
+        if (tryLookupLoadedTextureFast(rdram, packAddr, textureId, resultAddr))
+        {
+            static uint32_t s_lookupLogCount = 0u;
+            if (s_lookupLogCount < 24u)
+            {
+                std::cerr << "[nfs-hp2-alpha] GetLoadedTexture"
+                          << " pack=0x" << std::hex << packAddr
+                          << " texture=0x" << textureId
+                          << " table=0x" << readGuestU32Raw(rdram, packAddr + 0x60u)
+                          << " count=0x" << readGuestU32Raw(rdram, packAddr + 0x64u)
+                          << " result=0x" << resultAddr
+                          << std::dec << std::endl;
+                ++s_lookupLogCount;
+            }
+
+            setReturnU32(ctx, resultAddr);
+            ctx->pc = entryPc;
+            return;
+        }
+
+        static uint32_t s_fallbackLogCount = 0u;
+        if (s_fallbackLogCount < 8u)
+        {
+            std::cerr << "[nfs-hp2-alpha] GetLoadedTexture fallback to generated scan"
+                      << " pack=0x" << std::hex << packAddr
+                      << " texture=0x" << textureId
+                      << " table=0x" << readGuestU32Raw(rdram, packAddr + 0x60u)
+                      << " count=0x" << readGuestU32Raw(rdram, packAddr + 0x64u)
+                      << std::dec << std::endl;
+            ++s_fallbackLogCount;
+        }
+
+        GetLoadedTexture__11TexturePackUi_0x180b30(rdram, ctx, runtime);
+        if (ctx->pc == entryPc)
+        {
+            ctx->pc = entryPc;
+        }
+    }
+
     void applyNfsHp2AlphaOverrides(PS2Runtime &runtime)
     {
         runtime.registerFunction(0x10F1B8u, &nfsHp2AlphaSkipDebugInitHelper);
@@ -1470,7 +1850,9 @@ label_1fa834:
         runtime.registerFunction(0x1027B8u, &nfsHp2AlphaDownloadVuCode);
         runtime.registerFunction(0x115618u, &nfsHp2AlphaCreateDepthIntoAlphaBuffer);
         runtime.registerFunction(0x140208u, &nfsHp2AlphaFindEventNode);
+        runtime.registerFunction(0x180B30u, &nfsHp2AlphaGetLoadedTexture);
         runtime.registerFunction(0x181D20u, &nfsHp2AlphaBeginReadQueuedFile);
+        runtime.registerFunction(0x181E10u, &nfsHp2AlphaServiceQueuedFiles);
         runtime.registerFunction(0x1FA888u, &nfsHp2AlphaLoadDirectory);
         runtime.registerFunction(0x1FA548u, &nfsHp2AlphaTempDirectoryEntryCtor);
         runtime.registerFunction(0x1F8AE8u, &nfsHp2AlphaServiceFileSystem);
@@ -1479,6 +1861,10 @@ label_1fa834:
         runtime.registerFunction(0x1FA7B0u, &nfsHp2AlphaRecurseDirectoryContinuation);
         runtime.registerFunction(0x1FA804u, &nfsHp2AlphaRecurseDirectoryContinuation);
         runtime.registerFunction(0x1FA834u, &nfsHp2AlphaRecurseDirectoryContinuation);
+        std::cout << "[game_overrides] alpha registrations ready"
+                  << " getLoadedTexture=0x180b30"
+                  << " serviceQueuedFiles=0x181e10"
+                  << std::endl;
     }
 }
 

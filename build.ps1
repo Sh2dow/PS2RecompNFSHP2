@@ -1,5 +1,5 @@
 param(
-    [ValidateSet("menu", "smart", "output", "runtime", "run")]
+    [ValidateSet("menu", "smart", "output", "runtime", "runtime-output", "run")]
     [string]$Action = "menu",
     [string]$Configuration = "Debug",
     [string]$ElfPath = "F:\Games\ISO\PS2\ALPHA\SLUS_203.62",
@@ -230,6 +230,10 @@ function Get-SmartBuildPlan([string]$BuildConfig) {
     $excludeOutputDirs = @(
         (Join-Path $repoRoot "output\build"),
         (Join-Path $repoRoot "output\build-ninja"),
+        (Join-Path $repoRoot "output\build-ninja-debug"),
+        (Join-Path $repoRoot "output\build-ninja-release"),
+        (Join-Path $repoRoot "output\build-ninja-relwithdebinfo"),
+        (Join-Path $repoRoot "output\build-ninja-minsizerel"),
         (Join-Path $repoRoot "output\Debug"),
         (Join-Path $repoRoot "output\Release"),
         (Join-Path $repoRoot "output\RelWithDebInfo"),
@@ -270,6 +274,18 @@ function Get-SmartBuildPlan([string]$BuildConfig) {
     }
 }
 
+function Assert-ArtifactExists([string]$Path, [string]$Label, [string]$LogPath = "") {
+    if (Test-Path $Path) {
+        return
+    }
+
+    $message = "$Label is missing: $Path"
+    if (-not [string]::IsNullOrWhiteSpace($LogPath)) {
+        $message += ". See log: $LogPath"
+    }
+    throw $message
+}
+
 function Invoke-OutputBuild([string]$BuildConfig) {
     $backend = Get-PreferredOutputBackend $OutputBackend
     $outputBuildDir = Get-OutputBuildDir $backend $BuildConfig
@@ -288,18 +304,25 @@ function Invoke-OutputBuild([string]$BuildConfig) {
 
     if (-not (Test-Path $gameExe)) {
         Write-Host "[build] ps2_game.exe is missing, forcing target rebuild"
-        $forceRebuild = $true
+        if ($backend -ne "ninja") {
+            $forceRebuild = $true
+        }
     }
 
     if ((Test-Path $runtimeLib) -and (Test-Path $gameExe)) {
         $runtimeLibInfo = Get-Item $runtimeLib
         $gameExeInfo = Get-Item $gameExe
         if ($runtimeLibInfo.LastWriteTime -gt $gameExeInfo.LastWriteTime) {
-            Write-Host "[build] runtime lib is newer than ps2_game.exe, forcing relink"
-            $forceRebuild = $true
-            Remove-Item $gameExe -Force -ErrorAction SilentlyContinue
-            Remove-Item $gamePdb -Force -ErrorAction SilentlyContinue
-            Remove-Item $gameIlk -Force -ErrorAction SilentlyContinue
+            if ($backend -eq "ninja") {
+                Write-Host "[build] runtime lib is newer than ps2_game.exe, requesting incremental relink"
+            }
+            else {
+                Write-Host "[build] runtime lib is newer than ps2_game.exe, forcing relink"
+                $forceRebuild = $true
+                Remove-Item $gameExe -Force -ErrorAction SilentlyContinue
+                Remove-Item $gamePdb -Force -ErrorAction SilentlyContinue
+                Remove-Item $gameIlk -Force -ErrorAction SilentlyContinue
+            }
         }
     }
 
@@ -308,14 +331,16 @@ function Invoke-OutputBuild([string]$BuildConfig) {
     }
 
     Write-Host "[build] output-backend=$backend"
+    if ($backend -eq "ninja" -and $forceRebuild) {
+        Write-Host "[build] suppressing clean-first for ninja to preserve incremental chunk objects"
+        $forceRebuild = $false
+    }
     $buildResult = Invoke-CmakeBuild $outputBuildDir $BuildConfig "ps2_game" $forceRebuild
     if ($buildResult.ExitCode -ne 0) {
         return $buildResult.ExitCode
     }
 
-    if (-not (Test-Path $gameExe)) {
-        Write-Error "Build completed without producing $gameExe . See log: $($buildResult.LogPath)"
-    }
+    Assert-ArtifactExists $gameExe "ps2_game.exe" $buildResult.LogPath
 
     return 0
 }
@@ -329,8 +354,14 @@ function Invoke-RuntimeAndOutputBuild([string]$BuildConfig) {
     return (Invoke-OutputBuild $BuildConfig)
 }
 
+function Invoke-RuntimeBuild([string]$BuildConfig) {
+    $runtimeResult = Invoke-CmakeBuild "out\build" $BuildConfig "ps2_runtime"
+    return $runtimeResult.ExitCode
+}
+
 function Invoke-SmartBuild([string]$BuildConfig) {
     $plan = Get-SmartBuildPlan $BuildConfig
+    $expectedGameExe = Join-Path $repoRoot "output\$BuildConfig\ps2_game.exe"
 
     Write-Host "[smart] runtimeLatest=$($plan.RuntimeLatest.ToString('yyyy-MM-dd HH:mm:ss')) runtimeLib=$($plan.RuntimeLibTime.ToString('yyyy-MM-dd HH:mm:ss'))"
     Write-Host "[smart] outputLatest=$($plan.OutputLatest.ToString('yyyy-MM-dd HH:mm:ss')) gameExe=$($plan.GameExeTime.ToString('yyyy-MM-dd HH:mm:ss'))"
@@ -345,6 +376,7 @@ function Invoke-SmartBuild([string]$BuildConfig) {
             return (Invoke-OutputBuild $BuildConfig)
         }
         "none" {
+            Assert-ArtifactExists $expectedGameExe "ps2_game.exe"
             Write-Host "[smart] no build needed"
             return 0
         }
@@ -441,8 +473,9 @@ if ($Action -eq "menu") {
     Write-Host "build.ps1"
     Write-Host "1. Smart incremental build"
     Write-Host "2. Build output only"
-    Write-Host "3. Build ps2xRuntime and output"
-    Write-Host "4. Run game"
+    Write-Host "3. Build ps2xRuntime only"
+    Write-Host "4. Build ps2xRuntime and relink output"
+    Write-Host "5. Run game"
     Write-Host "backend: $(Get-PreferredOutputBackend $OutputBackend)"
     $choice = Read-Host "Choose action"
 
@@ -450,7 +483,8 @@ if ($Action -eq "menu") {
         "1" { $Action = "smart" }
         "2" { $Action = "output" }
         "3" { $Action = "runtime" }
-        "4" { $Action = "run" }
+        "4" { $Action = "runtime-output" }
+        "5" { $Action = "run" }
         default { throw "Unknown selection: $choice" }
     }
 }
@@ -489,6 +523,22 @@ switch ($Action) {
         }
     }
     "runtime" {
+        try {
+            $exitCode = Invoke-RuntimeBuild $Configuration
+            if ($exitCode -eq 0) {
+                Show-BuildNotification "PS2Recomp Build" "Runtime build finished successfully." "Info"
+            }
+            else {
+                Show-BuildNotification "PS2Recomp Build" "Runtime build failed with exit code $exitCode." "Error"
+            }
+            exit $exitCode
+        }
+        catch {
+            Show-BuildNotification "PS2Recomp Build" "Runtime build failed: $($_.Exception.Message)" "Error"
+            throw
+        }
+    }
+    "runtime-output" {
         try {
             $exitCode = Invoke-RuntimeAndOutputBuild $Configuration
             if ($exitCode -eq 0) {

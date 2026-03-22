@@ -524,6 +524,15 @@ namespace ps2_stubs
             return;
         }
 
+        if (stubName == "__dl__10AsyncEntryPv" ||
+            stubName == "__dl__5bFilePv" ||
+            stubName == "__dl__10QueuedFilePv")
+        {
+            const uint32_t thisAddr = getRegU32(ctx, 4);
+            setReturnU32(ctx, thisAddr);
+            return;
+        }
+
         if (stubName == "_str_out_char__FcPi")
         {
             const uint8_t ch = static_cast<uint8_t>(getRegU32(ctx, 4));
