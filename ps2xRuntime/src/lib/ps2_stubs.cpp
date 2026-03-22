@@ -401,6 +401,23 @@ namespace ps2_stubs
                 {
                     const uint32_t pendingCount = READ32(fileAddr + 0x74u);
                     WRITE32(fileAddr + 0x74u, pendingCount + 1u);
+                    static uint32_t asyncEntryCtorLogCount = 0u;
+                    if (asyncEntryCtorLogCount < 32u)
+                    {
+                        std::cerr << "[AsyncEntry:ctor]"
+                                  << " entry=0x" << std::hex << thisAddr
+                                  << " file=0x" << fileAddr
+                                  << " proc=0x" << procAddr
+                                  << " pendingBefore=0x" << pendingCount
+                                  << " pendingAfter=0x" << READ32(fileAddr + 0x74u)
+                                  << " off70=0x" << READ32(fileAddr + 0x70u)
+                                  << " type78=0x" << READ32(fileAddr + 0x78u)
+                                  << " read7c=0x" << READ32(fileAddr + 0x7Cu)
+                                  << " close80=0x" << READ32(fileAddr + 0x80u)
+                                  << " base84=0x" << READ32(fileAddr + 0x84u)
+                                  << std::dec << std::endl;
+                        ++asyncEntryCtorLogCount;
+                    }
                 }
             }
 

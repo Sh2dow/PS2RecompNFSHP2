@@ -4,6 +4,12 @@
 out
 .vscode
 build
+/output/build/
+/output/build-ninja/
+/output/build-ninja-debug/
+/output/Debug/
+/tools/ai/artifacts/
+/tools/ai/__pycache__/
 
 *.exe
 *.ilk

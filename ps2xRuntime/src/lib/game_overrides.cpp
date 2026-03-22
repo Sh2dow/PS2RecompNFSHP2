@@ -19,6 +19,9 @@
 #include <unordered_set>
 #include <vector>
 
+void BeginRead__10QueuedFile_0x181d20(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime);
+void bServiceFileSystem__Fv_0x1f8ae8(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime);
+
 namespace ps2_stubs
 {
     bool registerCdHostFileAlias(const std::string &syntheticKey,
@@ -1303,6 +1306,163 @@ label_1fa834:
         ctx->pc = getRegU32(ctx, 31);
     }
 
+    void nfsHp2AlphaBeginReadQueuedFile(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        if (!rdram || !ctx || !runtime)
+        {
+            if (runtime)
+            {
+                runtime->requestStop();
+            }
+            return;
+        }
+
+        const uint32_t queuedFile = getRegU32(ctx, 4);
+        const auto readGuestU32 = [&](uint32_t addr) -> uint32_t
+        {
+            return readLeU32(rdram + (addr & PS2_RAM_MASK));
+        };
+        const auto readGuestCString = [&](uint32_t addr, size_t maxLen) -> std::string
+        {
+            std::string out;
+            out.reserve(maxLen);
+            for (size_t i = 0; i < maxLen; ++i)
+            {
+                const char ch = static_cast<char>(rdram[(addr + static_cast<uint32_t>(i)) & PS2_RAM_MASK]);
+                if (ch == '\0')
+                {
+                    break;
+                }
+                out.push_back(ch);
+            }
+            return out;
+        };
+
+        const std::string path = readGuestCString(queuedFile + 0x0Cu, 0x30u);
+        const bool watchPath = equalsIgnoreCaseAscii(path, "GLOBAL\\DYNTEX.BIN");
+
+        if (watchPath)
+        {
+            std::cerr << "[nfs-hp2-alpha] BeginRead queuedFile=0x" << std::hex << queuedFile
+                      << " path=" << path
+                      << " target=0x" << readGuestU32(queuedFile + 0x08u)
+                      << " start=0x" << readGuestU32(queuedFile + 0x44u)
+                      << " limit=0x" << readGuestU32(queuedFile + 0x40u)
+                      << " reqSize=0x" << readGuestU32(queuedFile + 0x48u)
+                      << " cb=0x" << readGuestU32(queuedFile + 0x50u)
+                      << " cbUser=0x" << readGuestU32(queuedFile + 0x54u)
+                      << " state5c=0x" << readGuestU32(queuedFile + 0x5Cu)
+                      << " state60=0x" << readGuestU32(queuedFile + 0x60u)
+                      << std::dec << std::endl;
+        }
+
+        const uint32_t entryPc = ctx->pc;
+        BeginRead__10QueuedFile_0x181d20(rdram, ctx, runtime);
+        if (ctx->pc == entryPc)
+        {
+            ctx->pc = getRegU32(ctx, 31);
+        }
+
+        if (watchPath)
+        {
+            std::cerr << "[nfs-hp2-alpha] BeginRead:return queuedFile=0x" << std::hex << queuedFile
+                      << " state5c=0x" << readGuestU32(queuedFile + 0x5Cu)
+                      << " state60=0x" << readGuestU32(queuedFile + 0x60u)
+                      << " nextOff=0x" << readGuestU32(queuedFile + 0x44u)
+                      << " pc=0x" << ctx->pc
+                      << " ra=0x" << getRegU32(ctx, 31)
+                      << std::dec << std::endl;
+        }
+    }
+
+    void nfsHp2AlphaServiceFileSystem(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        if (!rdram || !ctx || !runtime)
+        {
+            if (runtime)
+            {
+                runtime->requestStop();
+            }
+            return;
+        }
+
+        const auto readGuestU32 = [&](uint32_t addr) -> uint32_t
+        {
+            return readLeU32(rdram + (addr & PS2_RAM_MASK));
+        };
+        const uint32_t queueSentinelAddr = ADD32(getRegU32(ctx, 28), 4294948200u);
+        const uint32_t sentinel = queueSentinelAddr;
+
+        auto logEntry = [&](const char *tag)
+        {
+            const uint32_t sentinelNext = readGuestU32(queueSentinelAddr + 0x0u);
+            const uint32_t sentinelPrev = readGuestU32(queueSentinelAddr + 0x4u);
+            uint32_t head = sentinelNext;
+
+            if ((head == 0u || head == sentinel) && sentinelPrev != 0u && sentinelPrev != sentinel)
+            {
+                // When the head link is corrupted or still zero, the tail link often still points at
+                // the only live entry. Logging that gives us the concrete async record instead of a
+                // meaningless dump from address zero.
+                head = sentinelPrev;
+            }
+
+            const bool queueLooksEmpty = (sentinelNext == sentinel && sentinelPrev == sentinel);
+            const bool headLooksValid = (head != 0u && head != sentinel);
+
+            const uint32_t fileAddr = headLooksValid ? readGuestU32(head + 0x08u) : 0u;
+            const uint32_t state = headLooksValid ? readGuestU32(head + 0x0Cu) : 0u;
+            const uint32_t arg14 = headLooksValid ? readGuestU32(head + 0x14u) : 0u;
+            const uint32_t arg18 = headLooksValid ? readGuestU32(head + 0x18u) : 0u;
+            const uint32_t arg1c = headLooksValid ? readGuestU32(head + 0x1Cu) : 0u;
+            const uint32_t arg20 = headLooksValid ? readGuestU32(head + 0x20u) : 0u;
+            const uint32_t proc = headLooksValid ? readGuestU32(head + 0x34u) : 0u;
+            const uint32_t pending = (fileAddr != 0u) ? readGuestU32(fileAddr + 0x74u) : 0u;
+            const uint32_t readProc = (fileAddr != 0u) ? readGuestU32(fileAddr + 0x7Cu) : 0u;
+            const uint32_t closeProc = (fileAddr != 0u) ? readGuestU32(fileAddr + 0x80u) : 0u;
+            const uint32_t lbn = (fileAddr != 0u) ? readGuestU32(fileAddr + 0x84u) : 0u;
+            const uint32_t off70 = (fileAddr != 0u) ? readGuestU32(fileAddr + 0x70u) : 0u;
+
+            static uint32_t serviceLogCount = 0u;
+            if (serviceLogCount < 128u)
+            {
+                std::cerr << "[nfs-hp2-alpha] bServiceFileSystem:" << tag
+                          << " gp=0x" << std::hex << getRegU32(ctx, 28)
+                          << " sentinel=0x" << sentinel
+                          << " sentinelNext=0x" << sentinelNext
+                          << " sentinelPrev=0x" << sentinelPrev
+                          << " head=0x" << head
+                          << " empty=" << (queueLooksEmpty ? 1 : 0)
+                          << " valid=" << (headLooksValid ? 1 : 0)
+                          << " file=0x" << fileAddr
+                          << " proc=0x" << proc
+                          << " state=0x" << state
+                          << " arg14=0x" << arg14
+                          << " arg18=0x" << arg18
+                          << " arg1c=0x" << arg1c
+                          << " arg20=0x" << arg20
+                          << " pending74=0x" << pending
+                          << " off70=0x" << off70
+                          << " read7c=0x" << readProc
+                          << " close80=0x" << closeProc
+                          << " base84=0x" << lbn
+                          << " next=0x" << (headLooksValid ? readGuestU32(head + 0x00u) : 0u)
+                          << " prev=0x" << (headLooksValid ? readGuestU32(head + 0x04u) : 0u)
+                          << std::dec << std::endl;
+                ++serviceLogCount;
+            }
+        };
+
+        logEntry("before");
+        const uint32_t entryPc = ctx->pc;
+        bServiceFileSystem__Fv_0x1f8ae8(rdram, ctx, runtime);
+        if (ctx->pc == entryPc)
+        {
+            ctx->pc = getRegU32(ctx, 31);
+        }
+        logEntry("after");
+    }
+
     void applyNfsHp2AlphaOverrides(PS2Runtime &runtime)
     {
         runtime.registerFunction(0x10F1B8u, &nfsHp2AlphaSkipDebugInitHelper);
@@ -1310,8 +1470,10 @@ label_1fa834:
         runtime.registerFunction(0x1027B8u, &nfsHp2AlphaDownloadVuCode);
         runtime.registerFunction(0x115618u, &nfsHp2AlphaCreateDepthIntoAlphaBuffer);
         runtime.registerFunction(0x140208u, &nfsHp2AlphaFindEventNode);
+        runtime.registerFunction(0x181D20u, &nfsHp2AlphaBeginReadQueuedFile);
         runtime.registerFunction(0x1FA888u, &nfsHp2AlphaLoadDirectory);
         runtime.registerFunction(0x1FA548u, &nfsHp2AlphaTempDirectoryEntryCtor);
+        runtime.registerFunction(0x1F8AE8u, &nfsHp2AlphaServiceFileSystem);
         runtime.registerFunction(0x1FA6C0u, &nfsHp2AlphaRecurseDirectoryContinuation);
         runtime.registerFunction(0x1FA7A0u, &nfsHp2AlphaRecurseDirectoryContinuation);
         runtime.registerFunction(0x1FA7B0u, &nfsHp2AlphaRecurseDirectoryContinuation);
