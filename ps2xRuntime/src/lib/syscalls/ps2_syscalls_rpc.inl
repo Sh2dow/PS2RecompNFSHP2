@@ -39,6 +39,25 @@ void SifLoadModule(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     const std::string modulePath = readGuestCStringBounded(rdram, pathAddr, kMaxSifModulePathBytes);
     if (modulePath.empty())
     {
+        static uint32_t emptyPathLogs = 0u;
+        if (emptyPathLogs < 32u)
+        {
+            std::ostringstream preview;
+            preview << std::hex;
+            for (uint32_t i = 0; i < 16u; ++i)
+            {
+                const uint8_t *bytePtr = getConstMemPtr(rdram, pathAddr + i);
+                const uint32_t value = bytePtr ? static_cast<uint32_t>(*bytePtr) : 0xFFFFFFFFu;
+                preview << (i == 0 ? "" : " ") << value;
+            }
+            std::cerr << "[SIF module] load failed: empty path"
+                      << " pathAddr=0x" << std::hex << pathAddr
+                      << " pc=0x" << ctx->pc
+                      << " ra=0x" << getRegU32(ctx, 31)
+                      << " preview=" << preview.str()
+                      << std::dec << std::endl;
+            ++emptyPathLogs;
+        }
         setReturnS32(ctx, -1);
         return;
     }
@@ -46,6 +65,18 @@ void SifLoadModule(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     const int32_t moduleId = trackSifModuleLoad(modulePath);
     if (moduleId <= 0)
     {
+        static uint32_t rejectedPathLogs = 0u;
+        if (rejectedPathLogs < 32u)
+        {
+            std::cerr << "[SIF module] load failed: rejected path"
+                      << " pathAddr=0x" << std::hex << pathAddr
+                      << " pc=0x" << ctx->pc
+                      << " ra=0x" << getRegU32(ctx, 31)
+                      << " path=\"" << modulePath << "\""
+                      << " key=\"" << normalizeSifModulePathKey(modulePath) << "\""
+                      << std::dec << std::endl;
+            ++rejectedPathLogs;
+        }
         setReturnS32(ctx, -1);
         return;
     }

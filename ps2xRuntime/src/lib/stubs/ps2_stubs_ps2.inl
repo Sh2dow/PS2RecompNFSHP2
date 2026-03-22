@@ -37,6 +37,48 @@ void sceCdRead(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
         return readCdSectors(args.lbn, args.sectors, rdram + offset, bytes);
     };
 
+    auto tryReadByteRange = [&](uint32_t byteOffset, uint32_t byteCount, uint32_t buf, const char *tag) -> bool
+    {
+        const uint32_t offset = buf & PS2_RAM_MASK;
+        if (offset >= PS2_RAM_SIZE)
+        {
+            return false;
+        }
+
+        const size_t bytes = std::min<size_t>(byteCount, PS2_RAM_SIZE - offset);
+        if (bytes == 0)
+        {
+            return true;
+        }
+
+        const std::filesystem::path cdImage = getCdImagePath();
+        if (cdImage.empty())
+        {
+            return false;
+        }
+
+        if (!readHostRange(cdImage, static_cast<uint64_t>(byteOffset), rdram + offset, bytes))
+        {
+            return false;
+        }
+
+        static uint32_t byteRangeRecoverLogCount = 0;
+        if (byteRangeRecoverLogCount < 16)
+        {
+            std::cout << "[sceCdRead] recovered with byte-range fallback " << tag
+                      << " (pc=0x" << std::hex << ctx->pc
+                      << " ra=0x" << getRegU32(ctx, 31)
+                      << " byteOffset=0x" << byteOffset
+                      << " byteCount=0x" << byteCount
+                      << " dst=0x" << buf << std::dec << ")" << std::endl;
+            ++byteRangeRecoverLogCount;
+        }
+
+        g_lastCdError = 0;
+        g_cdStreamingLbn = static_cast<uint32_t>((static_cast<uint64_t>(byteOffset) + bytes + kCdSectorSize - 1u) / kCdSectorSize);
+        return true;
+    };
+
     CdReadArgs selected{a0, a1, a2, "a0/a1/a2"};
     bool ok = tryRead(selected);
 
@@ -82,6 +124,16 @@ void sceCdRead(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
                     ok = true;
                     break;
                 }
+            }
+        }
+
+        if (!ok)
+        {
+            // Some wrappers appear to pass an absolute byte offset and byte count
+            // rather than a sector-aligned LBN/count pair.
+            if ((a0 & (kCdSectorSize - 1u)) != 0u && a1 > 1u)
+            {
+                ok = tryReadByteRange(a0, a1, a2, "a0=byteOffset,a1=byteCount,a2=dst");
             }
         }
 

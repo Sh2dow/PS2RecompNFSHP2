@@ -92,8 +92,23 @@ namespace
         bool wrapped = false;
     };
 
+    struct DispatchThreadSnapshot
+    {
+        uint32_t id = 0u;
+        uint32_t pc = 0u;
+        uint32_t ra = 0u;
+        uint32_t sp = 0u;
+        uint32_t gp = 0u;
+        uint32_t stableIterations = 0u;
+        bool pcZero = false;
+    };
+
     thread_local DispatchHistory g_dispatchHistory;
     thread_local std::unordered_map<PS2Runtime *, uint32_t> g_guestExecutionDepths;
+    thread_local uint32_t g_dispatchThreadId = 0u;
+    std::mutex g_dispatchSnapshotMutex;
+    std::unordered_map<uint32_t, DispatchThreadSnapshot> g_dispatchSnapshots;
+    std::atomic<uint32_t> g_nextDispatchThreadId{1u};
 
     void pushDispatchPc(uint32_t pc)
     {
@@ -127,6 +142,95 @@ namespace
             first = false;
             oss << "0x" << std::hex << h.pcs[idx];
         }
+        return oss.str();
+    }
+
+    uint32_t ensureDispatchThreadId()
+    {
+        if (g_dispatchThreadId == 0u)
+        {
+            g_dispatchThreadId = g_nextDispatchThreadId.fetch_add(1u, std::memory_order_relaxed);
+        }
+        return g_dispatchThreadId;
+    }
+
+    void updateDispatchSnapshot(uint32_t id, const R5900Context *ctx, uint32_t stableIterations, bool pcZero = false)
+    {
+        if (id == 0u || !ctx)
+        {
+            return;
+        }
+
+        DispatchThreadSnapshot snapshot{};
+        snapshot.id = id;
+        snapshot.pc = ctx->pc;
+        snapshot.ra = static_cast<uint32_t>(_mm_extract_epi32(ctx->r[31], 0));
+        snapshot.sp = static_cast<uint32_t>(_mm_extract_epi32(ctx->r[29], 0));
+        snapshot.gp = static_cast<uint32_t>(_mm_extract_epi32(ctx->r[28], 0));
+        snapshot.stableIterations = stableIterations;
+        snapshot.pcZero = pcZero;
+
+        std::lock_guard<std::mutex> lock(g_dispatchSnapshotMutex);
+        g_dispatchSnapshots[id] = snapshot;
+    }
+
+    void clearDispatchSnapshot(uint32_t id)
+    {
+        if (id == 0u)
+        {
+            return;
+        }
+
+        std::lock_guard<std::mutex> lock(g_dispatchSnapshotMutex);
+        g_dispatchSnapshots.erase(id);
+    }
+
+    std::string formatDispatchSnapshotsSummary(uint32_t currentPc, uint32_t currentSp)
+    {
+        std::vector<DispatchThreadSnapshot> snapshots;
+        {
+            std::lock_guard<std::mutex> lock(g_dispatchSnapshotMutex);
+            snapshots.reserve(g_dispatchSnapshots.size());
+            for (const auto &entry : g_dispatchSnapshots)
+            {
+                snapshots.push_back(entry.second);
+            }
+        }
+
+        if (snapshots.empty())
+        {
+            return "(none)";
+        }
+
+        std::sort(snapshots.begin(), snapshots.end(), [](const DispatchThreadSnapshot &a, const DispatchThreadSnapshot &b)
+                  { return a.id < b.id; });
+
+        std::ostringstream oss;
+        bool first = true;
+        for (const DispatchThreadSnapshot &snapshot : snapshots)
+        {
+            if (!first)
+            {
+                oss << " | ";
+            }
+            first = false;
+
+            oss << "#" << snapshot.id
+                << ":pc=0x" << std::hex << snapshot.pc
+                << ",ra=0x" << snapshot.ra
+                << ",sp=0x" << snapshot.sp
+                << ",gp=0x" << snapshot.gp
+                << std::dec << ",stable=" << snapshot.stableIterations;
+            if (snapshot.pcZero)
+            {
+                oss << ",pcZero=1";
+            }
+            if (snapshot.pc == currentPc && snapshot.sp == currentSp)
+            {
+                oss << ",sample=1";
+            }
+        }
+
         return oss.str();
     }
 
@@ -1082,6 +1186,24 @@ void PS2Runtime::configureIoPathsFromElf(const std::string &elfPath)
 void PS2Runtime::registerFunction(uint32_t address, RecompiledFunction func)
 {
     std::ofstream trace("ps2_register_trace.txt", std::ios::out | std::ios::app);
+    auto existing = std::lower_bound(
+        m_functionTable.begin(), m_functionTable.end(), address,
+        [](const RegisteredFunctionEntry &entry, uint32_t candidate)
+        { return entry.address < candidate; });
+
+    if (existing != m_functionTable.end() && existing->address == address)
+    {
+        if (trace)
+        {
+            trace << "replace address=0x" << std::hex << address
+                  << " oldFunc=0x" << reinterpret_cast<uintptr_t>(existing->func)
+                  << " newFunc=0x" << reinterpret_cast<uintptr_t>(func)
+                  << " size=" << std::dec << m_functionTable.size() << '\n';
+        }
+        existing->func = func;
+        return;
+    }
+
     const bool needsResort =
         !m_functionTable.empty() &&
         m_functionTable.back().address > address;
@@ -1896,6 +2018,7 @@ uint32_t PS2Runtime::reserveAsyncCallbackStack(uint32_t size, uint32_t alignment
 
 void PS2Runtime::dispatchLoop(uint8_t *rdram, R5900Context *ctx)
 {
+    const uint32_t dispatchThreadId = ensureDispatchThreadId();
     uint32_t lastPc = std::numeric_limits<uint32_t>::max();
     uint32_t samePcCount = 0;
     constexpr uint32_t kSamePcYieldInterval = 0x4000u;
@@ -1909,7 +2032,13 @@ void PS2Runtime::dispatchLoop(uint8_t *rdram, R5900Context *ctx)
             ++samePcCount;
             if ((samePcCount % kSamePcYieldInterval) == 0u)
             {
-                std::cout << "CPU is doing some work at PC 0x" << std::hex << pc << ". PC not updating." << std::endl;
+                std::cout << "[dispatch:pc-stable] pc=0x" << std::hex << pc
+                          << " ra=0x" << static_cast<uint32_t>(_mm_extract_epi32(ctx->r[31], 0))
+                          << " sp=0x" << static_cast<uint32_t>(_mm_extract_epi32(ctx->r[29], 0))
+                          << " gp=0x" << static_cast<uint32_t>(_mm_extract_epi32(ctx->r[28], 0))
+                          << " stableIterations=" << std::dec << samePcCount
+                          << " trace=" << formatDispatchHistory()
+                          << std::endl;
                 std::this_thread::yield();
             }
         }
@@ -1918,6 +2047,8 @@ void PS2Runtime::dispatchLoop(uint8_t *rdram, R5900Context *ctx)
             samePcCount = 0;
             lastPc = pc;
         }
+
+        updateDispatchSnapshot(dispatchThreadId, ctx, samePcCount);
 
         m_debugPc.store(pc, std::memory_order_relaxed);
         m_debugRa.store(static_cast<uint32_t>(_mm_extract_epi32(ctx->r[31], 0)), std::memory_order_relaxed);
@@ -1945,12 +2076,15 @@ void PS2Runtime::dispatchLoop(uint8_t *rdram, R5900Context *ctx)
                       << " gp=0x" << gp
                       << " trace=" << formatDispatchHistory()
                       << std::dec << std::endl;
+            updateDispatchSnapshot(dispatchThreadId, ctx, samePcCount, true);
 
             // PC=0 means this guest thread returned (usually via jr $ra with RA=0).
             // Do not request a global runtime stop here: other guest threads may still run.
             break;
         }
     }
+
+    clearDispatchSnapshot(dispatchThreadId);
 }
 
 void PS2Runtime::enterGuestExecution()
@@ -2233,10 +2367,14 @@ void PS2Runtime::run()
             uint64_t curGs = m_memory.gsWriteCount();
             uint64_t curVif = m_memory.vifWriteCount();
             const GSRegisters &gs = m_memory.gs();
-            const uint32_t dbgPc = m_debugPc.load(std::memory_order_relaxed);
-            const uint32_t dbgRa = m_debugRa.load(std::memory_order_relaxed);
-            const uint32_t dbgSp = m_debugSp.load(std::memory_order_relaxed);
-            const uint32_t dbgGp = m_debugGp.load(std::memory_order_relaxed);
+            const uint32_t livePc = m_cpuContext.pc;
+            const uint32_t liveRa = static_cast<uint32_t>(_mm_extract_epi32(m_cpuContext.r[31], 0));
+            const uint32_t liveSp = static_cast<uint32_t>(_mm_extract_epi32(m_cpuContext.r[29], 0));
+            const uint32_t liveGp = static_cast<uint32_t>(_mm_extract_epi32(m_cpuContext.r[28], 0));
+            const uint32_t dbgPc = livePc ? livePc : m_debugPc.load(std::memory_order_relaxed);
+            const uint32_t dbgRa = liveRa ? liveRa : m_debugRa.load(std::memory_order_relaxed);
+            const uint32_t dbgSp = liveSp ? liveSp : m_debugSp.load(std::memory_order_relaxed);
+            const uint32_t dbgGp = liveGp ? liveGp : m_debugGp.load(std::memory_order_relaxed);
             const int activeThreads = g_activeThreads.load(std::memory_order_relaxed);
 
             constexpr uint32_t kSndTransTypeAddr = 0x01E0E1C0u;
@@ -2327,6 +2465,7 @@ void PS2Runtime::run()
                       << " sndMirrorSe0=" << sndMirrorSe0
                       << " sndChkMidi=" << sndBankMidiCheck
                       << " sndChkSe=" << sndBankSeCheck
+                      << " workerPcs=" << formatDispatchSnapshotsSummary(dbgPc, dbgSp)
                       << std::endl;
 
             lastTickPc = dbgPc;

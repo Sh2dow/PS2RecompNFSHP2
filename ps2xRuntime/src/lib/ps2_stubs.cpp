@@ -220,6 +220,75 @@ namespace ps2_stubs
 #include "stubs/ps2_stubs_gs.inl"
 #include "stubs/ps2_stubs_residentEvilCV.inl"
 
+    bool registerCdHostFileAlias(const std::string &syntheticKey,
+                                 const std::filesystem::path &hostPath,
+                                 uint32_t *baseLbnOut,
+                                 uint32_t *sizeBytesOut)
+    {
+        std::error_code ec;
+        const std::filesystem::path normalizedHostPath = std::filesystem::weakly_canonical(hostPath, ec);
+        const std::filesystem::path effectiveHostPath =
+            (!ec && !normalizedHostPath.empty()) ? normalizedHostPath : hostPath.lexically_normal();
+
+        if (!std::filesystem::exists(effectiveHostPath, ec) || ec ||
+            !std::filesystem::is_regular_file(effectiveHostPath, ec))
+        {
+            g_lastCdError = -1;
+            return false;
+        }
+
+        for (const auto &[existingKey, existingEntry] : g_cdFilesByKey)
+        {
+            if (existingEntry.hostPath == effectiveHostPath)
+            {
+                if (baseLbnOut)
+                {
+                    *baseLbnOut = existingEntry.baseLbn;
+                }
+                if (sizeBytesOut)
+                {
+                    *sizeBytesOut = existingEntry.sizeBytes;
+                }
+                g_lastCdError = 0;
+                return true;
+            }
+        }
+
+        const std::string key = cdPathKey(syntheticKey);
+        if (key.empty())
+        {
+            g_lastCdError = -1;
+            return false;
+        }
+
+        const uint64_t sizeBytes64 = std::filesystem::file_size(effectiveHostPath, ec);
+        if (ec)
+        {
+            g_lastCdError = -1;
+            return false;
+        }
+
+        CdFileEntry entry;
+        entry.hostPath = effectiveHostPath;
+        entry.sizeBytes = static_cast<uint32_t>(std::min<uint64_t>(sizeBytes64, 0xFFFFFFFFu));
+        entry.baseLbn = g_nextPseudoLbn;
+        entry.sectors = sectorsForBytes(sizeBytes64);
+
+        g_nextPseudoLbn += entry.sectors + 1;
+        g_cdFilesByKey[key] = entry;
+
+        if (baseLbnOut)
+        {
+            *baseLbnOut = entry.baseLbn;
+        }
+        if (sizeBytesOut)
+        {
+            *sizeBytesOut = entry.sizeBytes;
+        }
+        g_lastCdError = 0;
+        return true;
+    }
+
     void TODO(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     {
         TODO_NAMED("unknown", rdram, ctx, runtime);
@@ -228,6 +297,26 @@ namespace ps2_stubs
     void TODO_NAMED(const char *name, uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     {
         const std::string stubName = name ? name : "unknown";
+        const auto copyGuestCString = [&](uint32_t srcAddr, uint32_t dstAddr, uint32_t maxBytes)
+        {
+            if (srcAddr == 0u || dstAddr == 0u || maxBytes == 0u)
+            {
+                return;
+            }
+
+            uint32_t i = 0u;
+            for (; i + 1u < maxBytes; ++i)
+            {
+                const uint8_t ch = READ8(srcAddr + i);
+                WRITE8(dstAddr + i, ch);
+                if (ch == 0u)
+                {
+                    return;
+                }
+            }
+
+            WRITE8(dstAddr + i, 0u);
+        };
 
         if (stubName == "__malloc_lock" ||
             stubName == "__malloc_unlock" ||
@@ -262,11 +351,9 @@ namespace ps2_stubs
                 const uint32_t fileSize = getRegU32(ctx, 7);
                 const uint32_t asyncReadProc = getRegU32(ctx, 8);
                 const uint32_t asyncCloseProc = getRegU32(ctx, 9);
-                const uint32_t asyncIdleSentinel = ADD32(getRegU32(ctx, 28), 4294948200);
-
                 WRITE32(thisAddr + 0x6Cu, fileSize);
                 WRITE32(thisAddr + 0x70u, 0u);
-                WRITE32(thisAddr + 0x74u, asyncIdleSentinel);
+                WRITE32(thisAddr + 0x74u, 0u);
                 WRITE32(thisAddr + 0x78u, fileType);
                 WRITE32(thisAddr + 0x7Cu, asyncReadProc);
                 WRITE32(thisAddr + 0x80u, asyncCloseProc);
@@ -318,6 +405,169 @@ namespace ps2_stubs
             }
 
             setReturnU32(ctx, thisAddr);
+            return;
+        }
+
+        if (stubName == "__10QueuedFilePvPCciiPFii_vi")
+        {
+            const uint32_t thisAddr = getRegU32(ctx, 4);
+            const uint32_t targetAddr = getRegU32(ctx, 5);
+            const uint32_t pathAddr = getRegU32(ctx, 6);
+            const uint32_t startOffset = getRegU32(ctx, 7);
+            const uint32_t requestSize = getRegU32(ctx, 8);
+            const uint32_t callbackAddr = getRegU32(ctx, 9);
+            const uint32_t callbackUserData = getRegU32(ctx, 10);
+
+            if (uint8_t *queuedFile = getMemPtr(rdram, thisAddr))
+            {
+                std::memset(queuedFile, 0, 0x64u);
+
+                // QueuedFile is a list node consumed by ServiceQueuedFiles.
+                WRITE32(thisAddr + 0x00u, thisAddr);
+                WRITE32(thisAddr + 0x04u, thisAddr);
+                WRITE32(thisAddr + 0x08u, targetAddr);
+                copyGuestCString(pathAddr, thisAddr + 0x0Cu, 0x30u);
+                WRITE32(thisAddr + 0x3Cu, 0u);
+                WRITE32(thisAddr + 0x40u, ADD32(startOffset, requestSize));
+                WRITE32(thisAddr + 0x44u, startOffset);
+                WRITE32(thisAddr + 0x48u, requestSize);
+                WRITE32(thisAddr + 0x4Cu, 0u);
+                WRITE32(thisAddr + 0x50u, callbackAddr);
+                WRITE32(thisAddr + 0x54u, callbackUserData);
+                WRITE32(thisAddr + 0x58u, targetAddr);
+                WRITE32(thisAddr + 0x5Cu, 0u);
+                WRITE32(thisAddr + 0x60u, 0u);
+            }
+
+            setReturnU32(ctx, thisAddr);
+            return;
+        }
+
+        if (stubName == "__12ResourceFilePCc16ResourceFileTypeiPFi_vi")
+        {
+            const uint32_t thisAddr = getRegU32(ctx, 4);
+            const uint32_t pathAddr = getRegU32(ctx, 5);
+            const uint32_t resourceType = getRegU32(ctx, 6);
+            const uint32_t flags = getRegU32(ctx, 7);
+
+            if (uint8_t *resourceFile = getMemPtr(rdram, thisAddr))
+            {
+                std::memset(resourceFile, 0, 0xD8u);
+
+                WRITE32(thisAddr + 0x00u, thisAddr);
+                WRITE32(thisAddr + 0x04u, thisAddr);
+                WRITE32(thisAddr + 0x08u, resourceType);
+                WRITE32(thisAddr + 0x0Cu, flags);
+                copyGuestCString(pathAddr, thisAddr + 0x10u, 0x50u);
+                WRITE32(thisAddr + 0xB0u, 0u);
+                WRITE32(thisAddr + 0xB4u, 0u);
+                WRITE32(thisAddr + 0xC0u, 0u);
+                WRITE32(thisAddr + 0xC4u, 0u);
+                WRITE32(thisAddr + 0xC8u, 0u);
+                WRITE32(thisAddr + 0xCCu, 0u);
+                WRITE32(thisAddr + 0xD4u, 0u);
+            }
+
+            setReturnU32(ctx, thisAddr);
+            return;
+        }
+
+        if (stubName == "__11TexturePackPCc")
+        {
+            const uint32_t thisAddr = getRegU32(ctx, 4);
+            const uint32_t pathAddr = getRegU32(ctx, 5);
+
+            if (uint8_t *texturePack = getMemPtr(rdram, thisAddr))
+            {
+                std::memset(texturePack, 0, 0x84u);
+
+                WRITE32(thisAddr + 0x00u, thisAddr);
+                WRITE32(thisAddr + 0x04u, thisAddr);
+                copyGuestCString(pathAddr, thisAddr + 0x28u, 0x30u);
+
+                // Match the safe default sentinel/state values used by the streaming variant.
+                WRITE32(thisAddr + 0x3Cu, 1u);
+                WRITE32(thisAddr + 0x40u, 0u);
+                WRITE32(thisAddr + 0x44u, 0xFFFFFFFFu);
+                WRITE32(thisAddr + 0x48u, 0u);
+                WRITE32(thisAddr + 0x4Cu, 0u);
+                WRITE32(thisAddr + 0x50u, 0u);
+                WRITE32(thisAddr + 0x54u, 0u);
+                WRITE32(thisAddr + 0x58u, 0xFFFFFFFFu);
+                WRITE32(thisAddr + 0x5Cu, 0u);
+                WRITE32(thisAddr + 0x60u, 0xFFFFFFFFu);
+                WRITE32(thisAddr + 0x64u, 0u);
+                WRITE32(thisAddr + 0x68u, 0u);
+                WRITE32(thisAddr + 0x78u, 0u);
+                WRITE32(thisAddr + 0x7Cu, 0u);
+                WRITE32(thisAddr + 0x80u, 0u);
+            }
+
+            setReturnU32(ctx, thisAddr);
+            return;
+        }
+
+        if (stubName == "_str_out_char__FcPi")
+        {
+            const uint8_t ch = static_cast<uint8_t>(getRegU32(ctx, 4));
+            const uint32_t countAddr = getRegU32(ctx, 5);
+            const uint32_t outPtrAddr = ADD32(getRegU32(ctx, 28), 4294948868u);
+            const uint32_t writePtr = READ32(outPtrAddr);
+            if (writePtr != 0u)
+            {
+                WRITE8(writePtr, ch);
+                WRITE32(outPtrAddr, ADD32(writePtr, 1u));
+            }
+
+            if (countAddr != 0u)
+            {
+                WRITE32(countAddr, ADD32(READ32(countAddr), 1u));
+            }
+
+            setReturnS32(ctx, 0);
+            return;
+        }
+
+        if (stubName == "_str_out_str__FPCciPi")
+        {
+            uint32_t srcAddr = getRegU32(ctx, 4);
+            int32_t remaining = static_cast<int32_t>(getRegU32(ctx, 5));
+            const uint32_t countAddr = getRegU32(ctx, 6);
+            const uint32_t outPtrAddr = ADD32(getRegU32(ctx, 28), 4294948868u);
+            uint32_t writePtr = READ32(outPtrAddr);
+            uint32_t written = 0u;
+
+            if (srcAddr != 0u && writePtr != 0u)
+            {
+                if (remaining < 0)
+                {
+                    remaining = std::numeric_limits<int32_t>::max();
+                }
+
+                while (remaining > 0)
+                {
+                    const uint8_t ch = READ8(srcAddr);
+                    if (ch == 0u)
+                    {
+                        break;
+                    }
+
+                    WRITE8(writePtr, ch);
+                    srcAddr = ADD32(srcAddr, 1u);
+                    writePtr = ADD32(writePtr, 1u);
+                    ++written;
+                    --remaining;
+                }
+
+                WRITE32(outPtrAddr, writePtr);
+            }
+
+            if (countAddr != 0u && written != 0u)
+            {
+                WRITE32(countAddr, ADD32(READ32(countAddr), written));
+            }
+
+            setReturnS32(ctx, 0);
             return;
         }
 

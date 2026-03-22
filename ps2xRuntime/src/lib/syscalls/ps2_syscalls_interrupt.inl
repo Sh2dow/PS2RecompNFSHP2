@@ -267,6 +267,13 @@ static void interruptWorkerMain(uint8_t *rdram, PS2Runtime *runtime)
 {
     g_currentThreadId = -1;
 
+    static std::atomic<uint32_t> s_interruptWorkerStartLogs{0u};
+    const uint32_t workerStartIndex = ++s_interruptWorkerStartLogs;
+    if (workerStartIndex <= 8u)
+    {
+        std::cout << "[vsync-worker:start] idx=" << workerStartIndex << std::endl;
+    }
+
     using clock = std::chrono::steady_clock;
     auto nextTick = clock::now() + kVblankPeriod;
 
@@ -296,6 +303,13 @@ static void interruptWorkerMain(uint8_t *rdram, PS2Runtime *runtime)
         for (int i = 0; i < ticksToProcess; ++i)
         {
             const uint64_t tickValue = signalVSyncFlag(rdram);
+            static std::atomic<uint32_t> s_interruptWorkerTickLogs{0u};
+            const uint32_t tickLogIndex = ++s_interruptWorkerTickLogs;
+            if (tickLogIndex <= 16u || (tickLogIndex % 120u) == 0u)
+            {
+                std::cout << "[vsync-worker:tick] idx=" << tickLogIndex
+                          << " tickValue=" << tickValue << std::endl;
+            }
             ps2_stubs::dispatchGsSyncVCallback(rdram, runtime, tickValue);
             dispatchIntcHandlersForCause(rdram, runtime, kIntcVblankStart);
             std::this_thread::sleep_for(std::chrono::microseconds(500));

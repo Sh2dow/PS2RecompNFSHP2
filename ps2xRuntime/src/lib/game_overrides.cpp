@@ -7,13 +7,25 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <mutex>
 #include <optional>
+#include <unordered_map>
+#include <unordered_set>
 #include <vector>
+
+namespace ps2_stubs
+{
+    bool registerCdHostFileAlias(const std::string &syntheticKey,
+                                 const std::filesystem::path &hostPath,
+                                 uint32_t *baseLbnOut,
+                                 uint32_t *sizeBytesOut);
+}
 
 namespace
 {
@@ -59,6 +71,213 @@ namespace
             return path;
         }
         return leaf.string();
+    }
+
+    uint32_t readLeU32(const uint8_t *src)
+    {
+        return static_cast<uint32_t>(src[0]) |
+               (static_cast<uint32_t>(src[1]) << 8) |
+               (static_cast<uint32_t>(src[2]) << 16) |
+               (static_cast<uint32_t>(src[3]) << 24);
+    }
+
+    void writeLeU32(uint8_t *dst, uint32_t value)
+    {
+        dst[0] = static_cast<uint8_t>((value >> 0) & 0xFFu);
+        dst[1] = static_cast<uint8_t>((value >> 8) & 0xFFu);
+        dst[2] = static_cast<uint8_t>((value >> 16) & 0xFFu);
+        dst[3] = static_cast<uint8_t>((value >> 24) & 0xFFu);
+    }
+
+    uint32_t nfsBinPathHash(std::string path)
+    {
+        std::replace(path.begin(), path.end(), '/', '\\');
+        std::transform(path.begin(), path.end(), path.begin(),
+                       [](unsigned char c)
+                       { return static_cast<char>(std::toupper(c)); });
+
+        uint32_t hash = 0xFFFFFFFFu;
+        for (const unsigned char c : path)
+        {
+            hash = 33u * hash + static_cast<uint32_t>(c);
+        }
+        return hash;
+    }
+
+    std::vector<std::string> parseCsvRow(const std::string &line)
+    {
+        std::vector<std::string> fields;
+        std::string current;
+        bool inQuotes = false;
+        for (size_t i = 0; i < line.size(); ++i)
+        {
+            const char ch = line[i];
+            if (ch == '"')
+            {
+                if (inQuotes && (i + 1) < line.size() && line[i + 1] == '"')
+                {
+                    current.push_back('"');
+                    ++i;
+                }
+                else
+                {
+                    inQuotes = !inQuotes;
+                }
+                continue;
+            }
+
+            if (ch == ',' && !inQuotes)
+            {
+                fields.push_back(current);
+                current.clear();
+                continue;
+            }
+
+            current.push_back(ch);
+        }
+        fields.push_back(current);
+        return fields;
+    }
+
+    std::filesystem::path detectNfsHp2UnpackedRoot(const PS2Runtime::IoPaths &paths)
+    {
+        std::vector<std::filesystem::path> probes;
+
+        auto appendProbeBase = [&](const std::filesystem::path &base)
+        {
+            if (base.empty())
+            {
+                return;
+            }
+
+            probes.push_back(base);
+            probes.push_back(base / "ZZDATA");
+
+            const std::filesystem::path parent = base.parent_path();
+            if (!parent.empty())
+            {
+                probes.push_back(parent / (base.filename().string() + "_OUT_Unpacker") / "ZZDATA");
+            }
+        };
+
+        appendProbeBase(paths.cdRoot);
+        appendProbeBase(paths.hostRoot);
+        appendProbeBase(paths.elfDirectory);
+        if (!paths.cdImage.empty())
+        {
+            appendProbeBase(paths.cdImage.parent_path());
+            appendProbeBase(paths.cdImage.parent_path() / paths.cdImage.stem());
+        }
+
+        std::error_code ec;
+        for (const std::filesystem::path &probe : probes)
+        {
+            if (probe.empty())
+            {
+                continue;
+            }
+
+            if (std::filesystem::exists(probe, ec) && !ec &&
+                std::filesystem::is_directory(probe, ec) && !ec &&
+                probe.filename().string() == "ZZDATA")
+            {
+                return probe.lexically_normal();
+            }
+            ec.clear();
+        }
+
+        return {};
+    }
+
+    const std::unordered_map<uint32_t, std::filesystem::path> &getNfsHp2UnpackedHashIndex(
+        const std::filesystem::path &root)
+    {
+        static std::mutex mutex;
+        static std::filesystem::path cachedRoot;
+        static std::unordered_map<uint32_t, std::filesystem::path> cachedIndex;
+
+        std::lock_guard<std::mutex> lock(mutex);
+        if (root.empty())
+        {
+            static const std::unordered_map<uint32_t, std::filesystem::path> empty;
+            return empty;
+        }
+
+        if (cachedRoot == root && !cachedIndex.empty())
+        {
+            return cachedIndex;
+        }
+
+        cachedRoot = root;
+        cachedIndex.clear();
+
+        std::error_code ec;
+        for (const auto &entry : std::filesystem::recursive_directory_iterator(
+                 root, std::filesystem::directory_options::skip_permission_denied, ec))
+        {
+            if (ec)
+            {
+                break;
+            }
+            if (!entry.is_regular_file())
+            {
+                continue;
+            }
+
+            const std::filesystem::path relative = std::filesystem::relative(entry.path(), root, ec);
+            if (ec || relative.empty())
+            {
+                ec.clear();
+                continue;
+            }
+
+            const std::string firstComponent = (*relative.begin()).string();
+            if (firstComponent == "__Unknown" || firstComponent == "__Unknown_Resolved")
+            {
+                continue;
+            }
+
+            cachedIndex.emplace(nfsBinPathHash(relative.generic_string()), entry.path().lexically_normal());
+        }
+
+        ec.clear();
+        const std::filesystem::path inventoryPath = root / "__Unknown_Resolved" / "inventory.csv";
+        std::ifstream inventory(inventoryPath);
+        if (inventory.is_open())
+        {
+            std::string line;
+            bool isFirstLine = true;
+            while (std::getline(inventory, line))
+            {
+                if (isFirstLine)
+                {
+                    isFirstLine = false;
+                    continue;
+                }
+
+                const std::vector<std::string> fields = parseCsvRow(line);
+                if (fields.size() < 9 || fields[0].empty() || fields[8].empty())
+                {
+                    continue;
+                }
+
+                char *end = nullptr;
+                const unsigned long parsed = std::strtoul(fields[0].c_str(), &end, 16);
+                if (!end || *end != '\0')
+                {
+                    continue;
+                }
+
+                const std::filesystem::path hostPath(fields[8]);
+                if (std::filesystem::exists(hostPath, ec) && !ec)
+                {
+                    cachedIndex.emplace(static_cast<uint32_t>(parsed), hostPath.lexically_normal());
+                }
+                ec.clear();
+            }
+        }
+
+        return cachedIndex;
     }
 
     uint32_t crc32Update(uint32_t crc, const uint8_t *data, size_t size)
@@ -831,6 +1050,33 @@ label_1fa834:
             return;
         }
 
+        const std::filesystem::path unpackedRoot = detectNfsHp2UnpackedRoot(paths);
+        const auto &unpackedHashIndex = getNfsHp2UnpackedHashIndex(unpackedRoot);
+        uint32_t remappedEntries = 0;
+        for (size_t offset = 0; offset < bytes.size(); offset += 12u)
+        {
+            const uint32_t nameHash = readLeU32(bytes.data() + offset + 0u);
+            const auto found = unpackedHashIndex.find(nameHash);
+            if (found == unpackedHashIndex.end())
+            {
+                continue;
+            }
+
+            char syntheticKey[32];
+            std::snprintf(syntheticKey, sizeof(syntheticKey), "__hash\\%08X", nameHash);
+
+            uint32_t pseudoLbn = 0;
+            uint32_t sizeBytes = 0;
+            if (!ps2_stubs::registerCdHostFileAlias(syntheticKey, found->second, &pseudoLbn, &sizeBytes))
+            {
+                continue;
+            }
+
+            writeLeU32(bytes.data() + offset + 4u, pseudoLbn);
+            writeLeU32(bytes.data() + offset + 8u, sizeBytes);
+            ++remappedEntries;
+        }
+
         auto callMalloc = [&](uint32_t allocBytes) -> uint32_t
         {
             if (!runtime->hasFunction(0x1FBFE0u))
@@ -879,6 +1125,8 @@ label_1fa834:
         if (!logged)
         {
             std::cerr << "[nfs-hp2-alpha] loaded DIR.BIN override entries=" << entryCount
+                      << " remapped=" << remappedEntries
+                      << " unpackedRoot=\"" << unpackedRoot.string() << "\""
                       << " table=0x" << std::hex << tableAddr
                       << " firstHash=0x" << READ32(tableAddr + 0)
                       << " firstLbn=0x" << READ32(tableAddr + 4)
@@ -976,12 +1224,92 @@ label_1fa834:
         ctx->pc = getRegU32(ctx, 31);
     }
 
+    void nfsHp2AlphaFindEventNode(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        if (!rdram || !ctx)
+        {
+            if (ctx)
+            {
+                setReturnU32(ctx, 0u);
+                ctx->pc = getRegU32(ctx, 31);
+            }
+            if (runtime)
+            {
+                runtime->requestStop();
+            }
+            return;
+        }
+
+        const uint32_t sentinel = getRegU32(ctx, 4);
+        const uint32_t wantedEvent = getRegU32(ctx, 5);
+        const auto readGuestU32 = [&](uint32_t addr) -> uint32_t
+        {
+            return readLeU32(rdram + (addr & PS2_RAM_MASK));
+        };
+
+        uint32_t node = readGuestU32(sentinel + 0u);
+        if (node == sentinel)
+        {
+            setReturnU32(ctx, 0u);
+            ctx->pc = getRegU32(ctx, 31);
+            return;
+        }
+
+        std::unordered_set<uint32_t> seen;
+        seen.reserve(64u);
+        uint32_t iterations = 0u;
+        while (node != sentinel)
+        {
+            if (!seen.insert(node).second)
+            {
+                std::cerr << "[nfs-hp2-alpha] joystick event list cycle detected"
+                          << " sentinel=0x" << std::hex << sentinel
+                          << " node=0x" << node
+                          << " event=0x" << wantedEvent
+                          << " next=0x" << readGuestU32(node + 0u)
+                          << " prev=0x" << readGuestU32(node + 4u)
+                          << " nodeEvent=0x" << readGuestU32(node + 8u)
+                          << std::dec << std::endl;
+                setReturnU32(ctx, 0u);
+                ctx->pc = getRegU32(ctx, 31);
+                return;
+            }
+
+            const uint32_t nodeEvent = readGuestU32(node + 8u);
+            if (nodeEvent == wantedEvent)
+            {
+                setReturnU32(ctx, node);
+                ctx->pc = getRegU32(ctx, 31);
+                return;
+            }
+
+            node = readGuestU32(node + 0u);
+            ++iterations;
+            if (iterations >= 256u)
+            {
+                std::cerr << "[nfs-hp2-alpha] joystick event list runaway"
+                          << " sentinel=0x" << std::hex << sentinel
+                          << " event=0x" << wantedEvent
+                          << " lastNode=0x" << node
+                          << std::dec
+                          << " iterations=" << iterations << std::endl;
+                setReturnU32(ctx, 0u);
+                ctx->pc = getRegU32(ctx, 31);
+                return;
+            }
+        }
+
+        setReturnU32(ctx, 0u);
+        ctx->pc = getRegU32(ctx, 31);
+    }
+
     void applyNfsHp2AlphaOverrides(PS2Runtime &runtime)
     {
         runtime.registerFunction(0x10F1B8u, &nfsHp2AlphaSkipDebugInitHelper);
         runtime.registerFunction(0x10F380u, &nfsHp2AlphaSkipDebugInitHelper);
         runtime.registerFunction(0x1027B8u, &nfsHp2AlphaDownloadVuCode);
         runtime.registerFunction(0x115618u, &nfsHp2AlphaCreateDepthIntoAlphaBuffer);
+        runtime.registerFunction(0x140208u, &nfsHp2AlphaFindEventNode);
         runtime.registerFunction(0x1FA888u, &nfsHp2AlphaLoadDirectory);
         runtime.registerFunction(0x1FA548u, &nfsHp2AlphaTempDirectoryEntryCtor);
         runtime.registerFunction(0x1FA6C0u, &nfsHp2AlphaRecurseDirectoryContinuation);

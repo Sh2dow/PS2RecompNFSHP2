@@ -53,6 +53,7 @@ void dispatchGsSyncVCallback(uint8_t *rdram, PS2Runtime *runtime, uint64_t tick)
     uint32_t gp = 0u;
     uint32_t callbackStackTop = 0u;
     const uint64_t callbackTick = (tick != 0u) ? tick : ps2_syscalls::GetCurrentVSyncTick();
+    static std::atomic<uint32_t> s_dispatchAttemptLogs{0u};
     {
         std::lock_guard<std::mutex> lock(g_gs_sync_v_callback_mutex);
         callback = g_gs_sync_v_callback_func;
@@ -60,12 +61,23 @@ void dispatchGsSyncVCallback(uint8_t *rdram, PS2Runtime *runtime, uint64_t tick)
         callbackStackTop = g_gs_sync_v_callback_stack_top;
         if (callback == 0u)
         {
+            const uint32_t logIndex = ++s_dispatchAttemptLogs;
+            if (logIndex <= 16u)
+            {
+                std::cout << "[sceGsSyncVCallback:dispatch-skip] reason=no-callback tick=" << callbackTick << std::endl;
+            }
             return;
         }
     }
 
     if (!runtime->hasFunction(callback))
     {
+        const uint32_t logIndex = ++s_dispatchAttemptLogs;
+        if (logIndex <= 16u)
+        {
+            std::cout << "[sceGsSyncVCallback:dispatch-skip] reason=missing-function callback=0x" << std::hex << callback
+                      << " tick=" << std::dec << callbackTick << std::endl;
+        }
         return;
     }
 
@@ -94,6 +106,17 @@ void dispatchGsSyncVCallback(uint8_t *rdram, PS2Runtime *runtime, uint64_t tick)
         SET_GPR_U32(&callbackCtx, 4, static_cast<uint32_t>(callbackTick));
         callbackCtx.pc = callback;
 
+        const uint32_t logIndex = ++s_dispatchAttemptLogs;
+        if (logIndex <= 16u || (logIndex % 120u) == 0u)
+        {
+            std::cout << "[sceGsSyncVCallback:dispatch] idx=" << logIndex
+                      << " callback=0x" << std::hex << callback
+                      << " gp=0x" << gp
+                      << " sp=0x" << getRegU32(&callbackCtx, 29)
+                      << std::dec
+                      << " tick=" << callbackTick << std::endl;
+        }
+
         uint32_t steps = 0u;
         while (callbackCtx.pc != 0u && !runtime->isStopRequested() && steps < 1024u)
         {
@@ -119,6 +142,18 @@ void dispatchGsSyncVCallback(uint8_t *rdram, PS2Runtime *runtime, uint64_t tick)
             }
             ++steps;
             step(rdram, &callbackCtx, runtime);
+        }
+
+        if (logIndex <= 16u || (logIndex % 120u) == 0u)
+        {
+            std::cout << "[sceGsSyncVCallback:return] idx=" << logIndex
+                      << " steps=" << steps
+                      << " pc=0x" << std::hex << callbackCtx.pc
+                      << " ra=0x" << getRegU32(&callbackCtx, 31)
+                      << " sp=0x" << getRegU32(&callbackCtx, 29)
+                      << " gp=0x" << getRegU32(&callbackCtx, 28)
+                      << std::dec
+                      << " tick=" << callbackTick << std::endl;
         }
     }
     catch (const std::exception &e)

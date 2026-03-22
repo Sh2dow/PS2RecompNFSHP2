@@ -126,6 +126,88 @@ namespace
         return ec ? std::filesystem::path(".") : cwd.lexically_normal();
     }
 
+    bool directoryExists(const std::filesystem::path &path)
+    {
+        std::error_code ec;
+        return !path.empty() && std::filesystem::exists(path, ec) &&
+               !ec && std::filesystem::is_directory(path, ec) && !ec;
+    }
+
+    void appendUniquePath(std::vector<std::filesystem::path> &pathsOut,
+                          std::unordered_set<std::string> &seen,
+                          const std::filesystem::path &path)
+    {
+        if (!directoryExists(path))
+        {
+            return;
+        }
+
+        const std::string key = toLowerAscii(path.lexically_normal().string());
+        if (seen.emplace(key).second)
+        {
+            pathsOut.push_back(path.lexically_normal());
+        }
+    }
+
+    std::filesystem::path detectUnpackedDataRoot()
+    {
+        const PS2Runtime::IoPaths &paths = PS2Runtime::getIoPaths();
+        std::vector<std::filesystem::path> probes;
+
+        auto appendProbeBase = [&](const std::filesystem::path &base)
+        {
+            if (base.empty())
+            {
+                return;
+            }
+
+            probes.push_back(base);
+            probes.push_back(base / "ZZDATA");
+
+            const std::filesystem::path parent = base.parent_path();
+            if (!parent.empty())
+            {
+                probes.push_back(parent / (base.filename().string() + "_OUT_Unpacker") / "ZZDATA");
+            }
+        };
+
+        appendProbeBase(paths.cdRoot);
+        appendProbeBase(paths.hostRoot);
+        appendProbeBase(paths.elfDirectory);
+
+        if (!paths.cdImage.empty())
+        {
+            appendProbeBase(paths.cdImage.parent_path());
+            const std::filesystem::path imageStemDir = paths.cdImage.parent_path() / paths.cdImage.stem();
+            appendProbeBase(imageStemDir);
+        }
+
+        for (const std::filesystem::path &probe : probes)
+        {
+            if (directoryExists(probe) &&
+                toLowerAscii(probe.filename().string()) == "zzdata")
+            {
+                return probe.lexically_normal();
+            }
+        }
+
+        return {};
+    }
+
+    std::vector<std::filesystem::path> getCdDataRoots()
+    {
+        std::vector<std::filesystem::path> roots;
+        std::unordered_set<std::string> seen;
+
+        appendUniquePath(roots, seen, detectUnpackedDataRoot());
+        appendUniquePath(roots, seen, getCdRootPath());
+
+        const PS2Runtime::IoPaths &paths = PS2Runtime::getIoPaths();
+        appendUniquePath(roots, seen, paths.hostRoot);
+        appendUniquePath(roots, seen, paths.elfDirectory);
+        return roots;
+    }
+
     bool hasCdImageExtension(const std::filesystem::path &path)
     {
         const std::string ext = toLowerAscii(path.extension().string());
@@ -418,34 +500,49 @@ namespace
             return true;
         }
 
-        const std::filesystem::path root = getCdRootPath();
-        std::filesystem::path path = cdHostPath(ps2Path);
+        const std::filesystem::path relative(normalizeCdPathNoPrefix(ps2Path));
+        std::filesystem::path path;
         std::error_code ec;
-        if (!std::filesystem::exists(path, ec) || ec || !std::filesystem::is_regular_file(path, ec))
+        bool found = false;
+        for (const std::filesystem::path &root : getCdDataRoots())
         {
-            const std::filesystem::path relative(normalizeCdPathNoPrefix(ps2Path));
+            path = root;
+            if (!relative.empty())
+            {
+                path /= relative;
+            }
+            path = path.lexically_normal();
+
+            ec.clear();
+            if (std::filesystem::exists(path, ec) && !ec && std::filesystem::is_regular_file(path, ec))
+            {
+                found = true;
+                break;
+            }
+
             std::filesystem::path resolvedCasePath;
             if (resolveCaseInsensitivePath(root, relative, resolvedCasePath))
             {
                 path = resolvedCasePath;
-                ec.clear();
+                found = true;
+                break;
             }
-            else
+
+            ensureCdLeafIndex(root);
+            const std::string leaf = toLowerAscii(relative.filename().string());
+            auto it = g_cdLeafIndex.find(leaf);
+            if (it != g_cdLeafIndex.end())
             {
-                ensureCdLeafIndex(root);
-                const std::string leaf = toLowerAscii(relative.filename().string());
-                auto it = g_cdLeafIndex.find(leaf);
-                if (it != g_cdLeafIndex.end())
-                {
-                    path = it->second;
-                    ec.clear();
-                }
-                else
-                {
-                    g_lastCdError = -1;
-                    return false;
-                }
+                path = it->second;
+                found = true;
+                break;
             }
+        }
+
+        if (!found)
+        {
+            g_lastCdError = -1;
+            return false;
         }
 
         const uint64_t sizeBytes = std::filesystem::file_size(path, ec);

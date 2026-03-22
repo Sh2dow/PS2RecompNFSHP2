@@ -41,22 +41,110 @@ namespace ps2_syscalls
 #include "syscalls/ps2_syscalls_system.inl"
     static void LegacyMonitorSyscall(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     {
-        (void)rdram;
         (void)runtime;
+
+        auto readGuestU32Local = [&](uint32_t addr, uint32_t &out) -> bool
+        {
+            if (!rdram)
+            {
+                out = 0u;
+                return false;
+            }
+            const uint8_t *p0 = &rdram[(addr + 0u) & PS2_RAM_MASK];
+            const uint8_t *p1 = &rdram[(addr + 1u) & PS2_RAM_MASK];
+            const uint8_t *p2 = &rdram[(addr + 2u) & PS2_RAM_MASK];
+            const uint8_t *p3 = &rdram[(addr + 3u) & PS2_RAM_MASK];
+            out = static_cast<uint32_t>(p0[0]) |
+                  (static_cast<uint32_t>(p1[0]) << 8) |
+                  (static_cast<uint32_t>(p2[0]) << 16) |
+                  (static_cast<uint32_t>(p3[0]) << 24);
+            return true;
+        };
+
+        auto readGuestBytesHex = [&](uint32_t addr, uint32_t bytes) -> std::string
+        {
+            if (!rdram || bytes == 0u)
+            {
+                return std::string();
+            }
+            std::ostringstream oss;
+            oss << std::hex;
+            for (uint32_t i = 0; i < bytes; ++i)
+            {
+                if (i != 0u)
+                {
+                    oss << ' ';
+                }
+                const uint8_t value = rdram[(addr + i) & PS2_RAM_MASK];
+                oss.width(2);
+                oss.fill('0');
+                oss << static_cast<uint32_t>(value);
+            }
+            return oss.str();
+        };
+
+        auto readGuestCStringLocal = [&](uint32_t addr, uint32_t maxLen) -> std::string
+        {
+            if (!rdram || maxLen == 0u)
+            {
+                return std::string();
+            }
+            std::string value;
+            value.reserve(maxLen);
+            for (uint32_t i = 0; i < maxLen; ++i)
+            {
+                const char ch = static_cast<char>(rdram[(addr + i) & PS2_RAM_MASK]);
+                if (ch == '\0')
+                {
+                    break;
+                }
+                value.push_back((ch >= 0x20 && ch <= 0x7e) ? ch : '.');
+            }
+            return value;
+        };
 
         static std::atomic<uint32_t> s_legacyMonitorLogCount{0};
         const uint32_t callIndex = ++s_legacyMonitorLogCount;
-        if (callIndex <= 8u)
+        const uint32_t op = getRegU32(ctx, 4);
+        const uint32_t a1 = getRegU32(ctx, 5);
+        const uint32_t a2 = getRegU32(ctx, 6);
+        const uint32_t a3 = getRegU32(ctx, 7);
+        if (callIndex <= 16u)
         {
             std::cerr << "[syscall 0x63] Treating legacy monitor call as unavailable."
                       << " pc=0x" << std::hex << ctx->pc
-                      << " a0=0x" << getRegU32(ctx, 4)
-                      << " a1=0x" << getRegU32(ctx, 5)
-                      << " a2=0x" << getRegU32(ctx, 6)
-                      << " a3=0x" << getRegU32(ctx, 7)
-                      << std::dec << std::endl;
+                      << " op=0x" << op
+                      << " a1=0x" << a1
+                      << " a2=0x" << a2
+                      << " a3=0x" << a3;
+
+            if (op == 0x15u && a1 != 0u)
+            {
+                uint32_t packetWord0 = 0u;
+                uint32_t packetWord1 = 0u;
+                uint32_t packetWord2 = 0u;
+                uint32_t packetWord3 = 0u;
+                (void)readGuestU32Local(a1 + 0x0u, packetWord0);
+                (void)readGuestU32Local(a1 + 0x4u, packetWord1);
+                (void)readGuestU32Local(a1 + 0x8u, packetWord2);
+                (void)readGuestU32Local(a1 + 0xCu, packetWord3);
+                std::cerr << " packet@0x" << a1
+                          << " w0=0x" << packetWord0
+                          << " w1=0x" << packetWord1
+                          << " w2=0x" << packetWord2
+                          << " w3=0x" << packetWord3
+                          << " bytes=[" << readGuestBytesHex(a1, 0x10u) << ']';
+                if (a2 != 0u)
+                {
+                    std::cerr << " payload@0x" << a2
+                              << " payload16=[" << readGuestBytesHex(a2, 0x10u) << ']'
+                              << " payloadStr=\"" << readGuestCStringLocal(a2, 32u) << '\"';
+                }
+            }
+
+            std::cerr << std::dec << std::endl;
         }
-        else if (callIndex == 9u)
+        else if (callIndex == 17u)
         {
             std::cerr << "[syscall 0x63] Further legacy monitor logs suppressed" << std::endl;
         }
