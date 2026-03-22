@@ -241,13 +241,25 @@ namespace ps2_stubs
         {
             if (existingEntry.hostPath == effectiveHostPath)
             {
+                const uint64_t sizeBytes64 = std::filesystem::file_size(effectiveHostPath, ec);
+                if (!ec)
+                {
+                    auto mutableIt = g_cdFilesByKey.find(existingKey);
+                    if (mutableIt != g_cdFilesByKey.end())
+                    {
+                        mutableIt->second.sizeBytes =
+                            static_cast<uint32_t>(std::min<uint64_t>(sizeBytes64, 0xFFFFFFFFu));
+                        mutableIt->second.sectors = sectorsForBytes(sizeBytes64);
+                    }
+                }
+
                 if (baseLbnOut)
                 {
-                    *baseLbnOut = existingEntry.baseLbn;
+                    *baseLbnOut = g_cdFilesByKey[existingKey].baseLbn;
                 }
                 if (sizeBytesOut)
                 {
-                    *sizeBytesOut = existingEntry.sizeBytes;
+                    *sizeBytesOut = g_cdFilesByKey[existingKey].sizeBytes;
                 }
                 g_lastCdError = 0;
                 return true;
@@ -318,6 +330,43 @@ namespace ps2_stubs
             WRITE8(dstAddr + i, 0u);
         };
 
+        const auto initBaseCameraCoordinator = [&](uint32_t thisAddr, uint32_t vtableAddr, uint32_t viewId)
+        {
+            if (uint8_t *coordinator = getMemPtr(rdram, thisAddr))
+            {
+                std::memset(coordinator, 0, 0x1Cu);
+
+                const uint32_t sentinelAddr = ADD32(getRegU32(ctx, 28), 4294944144u); // gp - 0x5A70
+                uint32_t sentinelNext = READ32(sentinelAddr + 0x00u);
+                uint32_t sentinelPrev = READ32(sentinelAddr + 0x04u);
+
+                if (sentinelNext == 0u || sentinelPrev == 0u)
+                {
+                    WRITE32(sentinelAddr + 0x00u, sentinelAddr);
+                    WRITE32(sentinelAddr + 0x04u, sentinelAddr);
+                    sentinelNext = sentinelAddr;
+                    sentinelPrev = sentinelAddr;
+                }
+
+                const bool listWasEmpty = (sentinelNext == sentinelAddr && sentinelPrev == sentinelAddr);
+
+                WRITE32(thisAddr + 0x00u, sentinelNext);
+                WRITE32(thisAddr + 0x04u, sentinelAddr);
+                WRITE32(thisAddr + 0x08u, 0u);      // camera mover
+                WRITE32(thisAddr + 0x0Cu, 0u);      // enabled / not disabled
+                WRITE32(thisAddr + 0x10u, viewId);  // view id
+                WRITE32(thisAddr + 0x14u, 0u);      // camera data reload flag
+                WRITE32(thisAddr + 0x18u, vtableAddr);
+
+                WRITE32(sentinelNext + 0x04u, thisAddr);
+                WRITE32(sentinelAddr + 0x00u, thisAddr);
+                if (listWasEmpty)
+                {
+                    WRITE32(sentinelAddr + 0x04u, thisAddr);
+                }
+            }
+        };
+
         if (stubName == "__malloc_lock" ||
             stubName == "__malloc_unlock" ||
             stubName == "__malloc_update_mallinfo")
@@ -334,6 +383,84 @@ namespace ps2_stubs
             else if (callIndex == 9u)
             {
                 std::cerr << "[stub] further malloc helper no-op logs suppressed" << std::endl;
+            }
+
+            setReturnS32(ctx, 0);
+            return;
+        }
+
+        if (stubName == "atexit")
+        {
+            static std::atomic<uint32_t> s_atexitLogCount{0};
+            const uint32_t callIndex = ++s_atexitLogCount;
+            if (callIndex <= 8u)
+            {
+                std::cerr << "[stub] treating atexit as a no-op"
+                          << " fn=0x" << std::hex << getRegU32(ctx, 4)
+                          << " pc=0x" << ctx->pc
+                          << " ra=0x" << getRegU32(ctx, 31)
+                          << std::dec << std::endl;
+            }
+            else if (callIndex == 9u)
+            {
+                std::cerr << "[stub] further atexit no-op logs suppressed" << std::endl;
+            }
+
+            setReturnS32(ctx, 0);
+            return;
+        }
+
+        if (stubName == "__builtin_delete" || stubName == "__builtin_vec_delete")
+        {
+            const uint32_t ptr = getRegU32(ctx, 4);
+            if (ptr != 0u && runtime->hasFunction(0x1FC190u))
+            {
+                const uint32_t savedPc = ctx->pc;
+                const uint32_t savedRa = getRegU32(ctx, 31);
+                SET_GPR_U32(ctx, 31, savedPc);
+                ctx->pc = 0x1FC190u;
+                auto targetFn = runtime->lookupFunction(0x1FC190u);
+                targetFn(rdram, ctx, runtime);
+                if (ctx->pc == 0x1FC190u)
+                {
+                    ctx->pc = savedPc;
+                }
+                SET_GPR_U32(ctx, 31, savedRa);
+            }
+
+            static std::atomic<uint32_t> s_builtinDeleteLogCount{0};
+            const uint32_t callIndex = ++s_builtinDeleteLogCount;
+            if (callIndex <= 12u)
+            {
+                std::cerr << "[stub] handled " << stubName
+                          << " ptr=0x" << std::hex << ptr
+                          << " pc=0x" << ctx->pc
+                          << " ra=0x" << getRegU32(ctx, 31)
+                          << std::dec << std::endl;
+            }
+            else if (callIndex == 13u)
+            {
+                std::cerr << "[stub] further builtin delete logs suppressed" << std::endl;
+            }
+
+            return;
+        }
+
+        if (stubName == "__dl__14eActiveTexturePv")
+        {
+            static std::atomic<uint32_t> s_activeTextureDeleteLogCount{0};
+            const uint32_t callIndex = ++s_activeTextureDeleteLogCount;
+            if (callIndex <= 8u)
+            {
+                std::cerr << "[stub] treating __dl__14eActiveTexturePv as a no-op"
+                          << " ptr=0x" << std::hex << getRegU32(ctx, 4)
+                          << " pc=0x" << ctx->pc
+                          << " ra=0x" << getRegU32(ctx, 31)
+                          << std::dec << std::endl;
+            }
+            else if (callIndex == 9u)
+            {
+                std::cerr << "[stub] further __dl__14eActiveTexturePv logs suppressed" << std::endl;
             }
 
             setReturnS32(ctx, 0);
@@ -466,6 +593,8 @@ namespace ps2_stubs
             const uint32_t pathAddr = getRegU32(ctx, 5);
             const uint32_t resourceType = getRegU32(ctx, 6);
             const uint32_t flags = getRegU32(ctx, 7);
+            const uint32_t callbackAddr = getRegU32(ctx, 8);
+            const uint32_t callbackUserData = getRegU32(ctx, 9);
 
             if (uint8_t *resourceFile = getMemPtr(rdram, thisAddr))
             {
@@ -478,6 +607,8 @@ namespace ps2_stubs
                 copyGuestCString(pathAddr, thisAddr + 0x10u, 0x50u);
                 WRITE32(thisAddr + 0xB0u, 0u);
                 WRITE32(thisAddr + 0xB4u, 0u);
+                WRITE32(thisAddr + 0xB8u, callbackAddr);
+                WRITE32(thisAddr + 0xBCu, callbackUserData);
                 WRITE32(thisAddr + 0xC0u, 0u);
                 WRITE32(thisAddr + 0xC4u, 0u);
                 WRITE32(thisAddr + 0xC8u, 0u);
@@ -485,6 +616,139 @@ namespace ps2_stubs
                 WRITE32(thisAddr + 0xD4u, 0u);
             }
 
+            setReturnU32(ctx, thisAddr);
+            return;
+        }
+
+        if (stubName == "__Q26speech5mgr_t")
+        {
+            const uint32_t thisAddr = getRegU32(ctx, 4);
+
+            if (uint8_t *speechMgr = getMemPtr(rdram, thisAddr))
+            {
+                // getInstance__Q26speech5mgr_t uses a static singleton at 0x2CE328 and
+                // the generated ctor touches fields through at least +0x508.
+                std::memset(speechMgr, 0, 0x50Cu);
+                WRITE32(thisAddr + 0x504u, 0u);
+                WRITE32(thisAddr + 0x508u, 0u);
+            }
+
+            setReturnU32(ctx, thisAddr);
+            return;
+        }
+
+        if (stubName == "__11SpeechNoise")
+        {
+            const uint32_t thisAddr = getRegU32(ctx, 4);
+
+            if (uint8_t *speechNoise = getMemPtr(rdram, thisAddr))
+            {
+                // The singleton is static at 0x2DE000. Runtime users immediately read
+                // flags and sample pointers through +0x30, so start from a clean zeroed state.
+                std::memset(speechNoise, 0, 0x40u);
+            }
+
+            setReturnU32(ctx, thisAddr);
+            return;
+        }
+
+        if (stubName == "__17TextureDownloaderii")
+        {
+            const uint32_t thisAddr = getRegU32(ctx, 4);
+            const uint32_t pageBudget = getRegU32(ctx, 5);
+
+            if (uint8_t *textureDownloader = getMemPtr(rdram, thisAddr))
+            {
+                std::memset(textureDownloader, 0, 0x24u);
+
+                // Layout inferred from DownloadSingle/DoubleBuffered and AddTexturesSorted:
+                // +0x0 current start, +0x4 total/page budget, +0x8 split cursor,
+                // +0xC double-buffer active, +0x10 single-buffer active, +0x14 list sentinel.
+                WRITE32(thisAddr + 0x00u, 0u);
+                WRITE32(thisAddr + 0x04u, pageBudget);
+                WRITE32(thisAddr + 0x08u, 0u);
+                WRITE32(thisAddr + 0x0Cu, 0u);
+                WRITE32(thisAddr + 0x10u, 0u);
+                WRITE32(thisAddr + 0x14u, ADD32(thisAddr, 0x14u));
+                WRITE32(thisAddr + 0x18u, ADD32(thisAddr, 0x14u));
+                WRITE32(thisAddr + 0x1Cu, 0u);
+                WRITE32(thisAddr + 0x20u, 0u);
+            }
+
+            setReturnU32(ctx, thisAddr);
+            return;
+        }
+
+        if (stubName == "__10NisManagerPCc")
+        {
+            const uint32_t thisAddr = getRegU32(ctx, 4);
+            const uint32_t nameAddr = getRegU32(ctx, 5);
+
+            if (uint8_t *nisManager = getMemPtr(rdram, thisAddr))
+            {
+                // Current users read/link fields through at least +0xD0. Keep the base node
+                // and all render/resource pointers in a clean self-consistent state.
+                std::memset(nisManager, 0, 0xD4u);
+
+                // Intrusive bNode header at object base.
+                WRITE32(thisAddr + 0x00u, thisAddr);
+                WRITE32(thisAddr + 0x04u, thisAddr);
+
+                // Treat as stack/static owned by default so the dtor does not take the free path.
+                WRITE32(thisAddr + 0x0Cu, 0u);
+
+                // Optional debug/name storage is a guest string pointer in this build.
+                WRITE32(thisAddr + 0x10u, nameAddr);
+
+                // Resource/camera/animation/render pointers start empty.
+                WRITE32(thisAddr + 0x14u, 0u);
+                WRITE32(thisAddr + 0x18u, 0u);
+                WRITE32(thisAddr + 0x3Cu, 0u);
+                WRITE32(thisAddr + 0x40u, 0u);
+                WRITE32(thisAddr + 0x44u, 0u);
+                WRITE32(thisAddr + 0x48u, 0u);
+                WRITE32(thisAddr + 0x4Cu, 0u);
+                WRITE32(thisAddr + 0x50u, 0u);
+                WRITE32(thisAddr + 0x54u, 0u);
+                WRITE32(thisAddr + 0x58u, 0u);
+                WRITE32(thisAddr + 0x5Cu, 0u);
+                WRITE32(thisAddr + 0x80u, 0u);
+                WRITE32(thisAddr + 0x84u, 0u);
+                WRITE32(thisAddr + 0x88u, 0u);
+                WRITE32(thisAddr + 0x8Cu, 0u);
+                WRITE32(thisAddr + 0xA0u, 0u);
+                WRITE32(thisAddr + 0xA4u, 0u);
+                WRITE32(thisAddr + 0xA8u, 0u);
+                WRITE32(thisAddr + 0xACu, 0u);
+                WRITE32(thisAddr + 0xB0u, 0u);
+                WRITE32(thisAddr + 0xB4u, 0u);
+                WRITE32(thisAddr + 0xB8u, 0u);
+                WRITE32(thisAddr + 0xBCu, 0u);
+                WRITE32(thisAddr + 0xC0u, 0u);
+                WRITE32(thisAddr + 0xC4u, 0u);
+                WRITE32(thisAddr + 0xC8u, 0u);
+                WRITE32(thisAddr + 0xCCu, 0u);
+                WRITE32(thisAddr + 0xD0u, 0u);
+            }
+
+            setReturnU32(ctx, thisAddr);
+            return;
+        }
+
+        if (stubName == "__21BaseCameraCoordinatori")
+        {
+            const uint32_t thisAddr = getRegU32(ctx, 4);
+            const uint32_t viewId = getRegU32(ctx, 5);
+            initBaseCameraCoordinator(thisAddr, 0x25BE70u, viewId);
+            setReturnU32(ctx, thisAddr);
+            return;
+        }
+
+        if (stubName == "__20NisCameraCoordinatoriP3Carifi")
+        {
+            const uint32_t thisAddr = getRegU32(ctx, 4);
+            const uint32_t viewId = getRegU32(ctx, 5);
+            initBaseCameraCoordinator(thisAddr, 0x25BDE0u, viewId);
             setReturnU32(ctx, thisAddr);
             return;
         }
@@ -524,12 +788,163 @@ namespace ps2_stubs
             return;
         }
 
+        if (stubName == "__Q22M211MoviePlayer")
+        {
+            const uint32_t thisAddr = getRegU32(ctx, 4);
+            if (uint8_t *moviePlayer = getMemPtr(rdram, thisAddr))
+            {
+                // The ALPHA namespaced MoviePlayer object is later treated as a plain
+                // state blob with live fields up through at least +0x1E8. Zeroing the
+                // whole object avoids poisoned pointers reaching InitFile/Update.
+                std::memset(moviePlayer, 0, 0x1F0u);
+            }
+
+            setReturnU32(ctx, thisAddr);
+            return;
+        }
+
+        if (stubName == "__11MoviePlayer")
+        {
+            const uint32_t thisAddr = getRegU32(ctx, 4);
+            if (uint8_t *moviePlayer = getMemPtr(rdram, thisAddr))
+            {
+                // The retail-style MoviePlayer layout reaches at least +0x1E8 and keeps
+                // a vtable at +0x0. The dtor restores 0x25D4F8, so use the same value
+                // here while clearing the rest of the object to a safe baseline.
+                std::memset(moviePlayer, 0, 0x1F0u);
+                WRITE32(thisAddr + 0x00u, 0x25D4F8u);
+            }
+
+            setReturnU32(ctx, thisAddr);
+            return;
+        }
+
+        if (stubName == "__5bSlotPcUi")
+        {
+            const uint32_t thisAddr = getRegU32(ctx, 4);
+            const uint32_t nameAddr = getRegU32(ctx, 5);
+            const uint32_t channelsOrFlags = getRegU32(ctx, 6);
+
+            if (uint8_t *slot = getMemPtr(rdram, thisAddr))
+            {
+                std::memset(slot, 0, 0x114u);
+
+                // bSlot stores its display/name string inline at object base.
+                copyGuestCString(nameAddr, thisAddr, 0x100u);
+                WRITE32(thisAddr + 0x100u, 0u);
+                WRITE32(thisAddr + 0x104u, 0u);
+                WRITE32(thisAddr + 0x108u, channelsOrFlags);
+                WRITE32(thisAddr + 0x10Cu, channelsOrFlags);
+                WRITE32(thisAddr + 0x110u, 0u);
+            }
+
+            setReturnU32(ctx, thisAddr);
+            return;
+        }
+
+        if (stubName == "__9cSEDWedge")
+        {
+            const uint32_t thisAddr = getRegU32(ctx, 4);
+
+            if (uint8_t *wedge = getMemPtr(rdram, thisAddr))
+            {
+                std::memset(wedge, 0, 0x860u);
+                WRITE32(thisAddr + 0x50u, 0u);
+                WRITE32(thisAddr + 0x54u, 0u);
+                WRITE32(thisAddr + 0x85Cu, 0x254BB0u);
+            }
+
+            setReturnU32(ctx, thisAddr);
+            return;
+        }
+
+        if (stubName == "__17FlailerScreenList")
+        {
+            const uint32_t thisAddr = getRegU32(ctx, 4);
+
+            if (uint8_t *screenList = getMemPtr(rdram, thisAddr))
+            {
+                std::memset(screenList, 0, 0x1A4u);
+
+                const uint32_t sentinelAddr = thisAddr + 0x198u;
+                WRITE32(thisAddr + 0x180u, 0u);
+                WRITE32(thisAddr + 0x184u, 0u);
+                WRITE32(thisAddr + 0x188u, 0u);
+                WRITE32(thisAddr + 0x18Cu, 0u);
+                WRITE32(thisAddr + 0x190u, 0u);
+                WRITE32(thisAddr + 0x194u, 0u);
+                WRITE32(thisAddr + 0x198u, sentinelAddr);
+                WRITE32(thisAddr + 0x19Cu, sentinelAddr);
+                WRITE32(thisAddr + 0x1A0u, 0u);
+            }
+
+            setReturnU32(ctx, thisAddr);
+            return;
+        }
+
+        if (stubName == "__6bMixer")
+        {
+            const uint32_t thisAddr = getRegU32(ctx, 4);
+
+            if (uint8_t *mixer = getMemPtr(rdram, thisAddr))
+            {
+                std::memset(mixer, 0, 0x40u);
+            }
+
+            setReturnU32(ctx, thisAddr);
+            return;
+        }
+
+        if (stubName == "__7bDriver")
+        {
+            const uint32_t thisAddr = getRegU32(ctx, 4);
+
+            if (uint8_t *driver = getMemPtr(rdram, thisAddr))
+            {
+                std::memset(driver, 0, 0x800u);
+            }
+
+            setReturnU32(ctx, thisAddr);
+            return;
+        }
+
         if (stubName == "__dl__10AsyncEntryPv" ||
             stubName == "__dl__5bFilePv" ||
             stubName == "__dl__10QueuedFilePv")
         {
             const uint32_t thisAddr = getRegU32(ctx, 4);
             setReturnU32(ctx, thisAddr);
+            return;
+        }
+
+        if (stubName == "MCInit__3cMC")
+        {
+            setReturnS32(ctx, 0);
+            return;
+        }
+
+        if (stubName == "__main")
+        {
+            setReturnS32(ctx, 0);
+            return;
+        }
+
+        if (stubName == "InitAlarm")
+        {
+            setReturnS32(ctx, 0);
+            return;
+        }
+
+        if (stubName == "sceScfGetLanguage")
+        {
+            // Default to English on host.
+            setReturnS32(ctx, 1);
+            return;
+        }
+
+        if (stubName == "sceSdRemote")
+        {
+            setReturnS32(ctx, 0);
             return;
         }
 

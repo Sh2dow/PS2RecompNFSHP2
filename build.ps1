@@ -6,6 +6,7 @@ param(
     [string]$ExePath = "",
     [ValidateSet("auto", "vs", "ninja")]
     [string]$OutputBackend = "auto",
+    [int]$RunTimeoutSeconds = 15,
     [switch]$TailLog,
     [switch]$NoWait
 )
@@ -403,6 +404,9 @@ function Invoke-GameRun([string]$RunElfPath, [string]$RunExePath, [bool]$ShouldT
     Write-Host "[run] elf=$RunElfPath"
     Write-Host "[run] ps2Log=$logPath"
     Write-Host "[run] rawLog=$rawLogPath"
+    if (-not $ShouldNoWait) {
+        Write-Host "[run] timeoutSeconds=$RunTimeoutSeconds"
+    }
 
     if (Test-Path $logPath) {
         Remove-Item $logPath -Force
@@ -429,8 +433,19 @@ function Invoke-GameRun([string]$RunElfPath, [string]$RunExePath, [bool]$ShouldT
                                   -WorkingDirectory $exeDir `
                                   -RedirectStandardOutput $stdoutPath `
                                   -RedirectStandardError $stderrPath `
-                                  -PassThru `
-                                  -Wait
+                                  -PassThru
+
+            $finished = $proc.WaitForExit([Math]::Max(1000, $RunTimeoutSeconds * 1000))
+            if (-not $finished) {
+                Write-Warning "run timeout reached after $RunTimeoutSeconds seconds; terminating ps2_game.exe"
+                try {
+                    $proc.Kill()
+                    $proc.WaitForExit()
+                }
+                catch {
+                    Write-Warning "Failed to terminate timed-out run cleanly: $($_.Exception.Message)"
+                }
+            }
 
             $stdoutLines = if (Test-Path $stdoutPath) { Get-Content $stdoutPath } else { @() }
             $stderrLines = if (Test-Path $stderrPath) { Get-Content $stderrPath } else { @() }
@@ -453,16 +468,26 @@ function Invoke-GameRun([string]$RunElfPath, [string]$RunExePath, [bool]$ShouldT
         }
 
         if (Test-Path $logPath) {
-            Write-Host "[run] tailing $logPath"
-            Get-Content $logPath -Wait
-            return 0
+        Write-Host "[run] tailing $logPath"
+        Get-Content $logPath -Wait
+        return 0
         }
 
         Write-Warning "ps2_log.txt was not created before timeout."
     }
 
     if (-not $ShouldNoWait) {
-        $proc.WaitForExit()
+        $finished = $proc.WaitForExit([Math]::Max(1000, $RunTimeoutSeconds * 1000))
+        if (-not $finished) {
+            Write-Warning "run timeout reached after $RunTimeoutSeconds seconds; terminating ps2_game.exe"
+            try {
+                $proc.Kill()
+                $proc.WaitForExit()
+            }
+            catch {
+                Write-Warning "Failed to terminate timed-out run cleanly: $($_.Exception.Message)"
+            }
+        }
         return $proc.ExitCode
     }
 

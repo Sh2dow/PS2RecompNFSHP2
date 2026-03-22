@@ -20,6 +20,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -29,6 +30,16 @@ from typing import Iterable
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_STATE = ROOT / "PS2_PROJECT_STATE.md"
 DEFAULT_OUTPUT = ROOT / "tools" / "ai" / "artifacts" / "latest"
+DEFAULT_OPENCLAW_EXECUTABLE = "openclaw"
+DEFAULT_OPENCLAW_ARGS = [
+    "agent",
+    "--local",
+    "--json",
+    "--agent",
+    "main",
+    "--message",
+    "{{PROMPT_TEXT}}",
+]
 DEFAULT_QWEN_PROMPT = """You are a PS2Recomp build and runtime triage assistant working under a strict skill contract.
 
 Your role is preprocessing only. You do not make final engineering decisions.
@@ -135,6 +146,17 @@ Artifacts written by default:
 - qwen-triage.json
 - codex-handoff.md
 - codex-handoff-annotated.md
+
+OpenClaw preset for run-qwen:
+- executable: `openclaw`
+- args:
+  - `agent`
+  - `--local`
+  - `--json`
+  - `--agent`
+  - `main`
+  - `--message`
+  - `{{PROMPT_TEXT}}`
 """
 
 INTERACTIVE_MENU = """Choose an action:
@@ -354,9 +376,21 @@ def run_qwen(args: argparse.Namespace) -> dict[str, str | int | list[str]]:
     prompt_path = Path(qwen_outputs["qwen_prompt"])
     prompt_text = read_text(prompt_path)
 
-    cmd = [args.executable]
+    executable = args.executable
+    resolved_executable = shutil.which(executable)
+    if resolved_executable is None and executable.lower() == "openclaw":
+        resolved_executable = shutil.which("openclaw.cmd")
+    if resolved_executable is None:
+        raise SystemExit(
+            f"Local Qwen executable not found: {executable}. "
+            "For OpenClaw, use `openclaw` and let the helper resolve the local shim."
+        )
+
+    cmd = [resolved_executable]
     for arg in args.exec_args:
-        cmd.append(arg.replace(args.prompt_argument_placeholder, str(prompt_path)))
+        replaced = arg.replace("{{PROMPT_PATH}}", str(prompt_path))
+        replaced = replaced.replace("{{PROMPT_TEXT}}", prompt_text)
+        cmd.append(replaced)
 
     completed = subprocess.run(
         cmd,
@@ -488,12 +522,16 @@ def interactive_args() -> argparse.Namespace:
         common["qwen_json_path"] = Path(prompt_text("Qwen JSON path"))
         return build_namespace(command, common)
 
-    common["executable"] = prompt_text("Local Qwen executable")
+    common["executable"] = prompt_text("Local Qwen executable", DEFAULT_OPENCLAW_EXECUTABLE)
     common["prompt_mode"] = prompt_text("Prompt mode", "stdin")
     exec_args = prompt_list("Executable args")
+    if exec_args == [DEFAULT_OPENCLAW_EXECUTABLE] and common["executable"] == DEFAULT_OPENCLAW_EXECUTABLE:
+        exec_args = []
+    if not exec_args and common["executable"] == DEFAULT_OPENCLAW_EXECUTABLE:
+        exec_args = list(DEFAULT_OPENCLAW_ARGS)
     common["exec_arg"] = exec_args
     common["prompt_argument_placeholder"] = prompt_text(
-        "Prompt path placeholder", "{{PROMPT_PATH}}"
+        "Prompt placeholder", "{{PROMPT_TEXT}}"
     )
     common["timeout_seconds"] = int(prompt_text("Timeout seconds", "180"))
     common["allow_non_json"] = prompt_yes_no("Allow non-JSON output?", default=False)

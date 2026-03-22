@@ -22,7 +22,35 @@
 void BeginRead__10QueuedFile_0x181d20(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime);
 void ServiceQueuedFiles__Fv_0x181e10(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime);
 void bServiceFileSystem__Fv_0x1f8ae8(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime);
+void eFixUpTables__Fv_0x102f50(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime);
+void eGetRenderTargetTextureInfo__Fi_0x104168(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime);
+void FixStripSTs__6eSolid_0x108ba0(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime);
+void afxUpdateTextures__Fv_0x11fc60(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime);
+void LoadCommonRegion__6bSound_0x20cf50(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime);
+void eFindAnimationSolid__FUi_0x17ca70(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime);
+void ReconnectSolid__10eAnimation_0x17bfd0(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime);
+void ReconnectAllAnimations__Fv_0x17c520(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime);
+void ReconnectSolid__6eModel_0x109018(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime);
+void ApplyReplacementTextureTable__6eModel_0x109248(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime);
+void ReconnectAllModels__Fv_0x1094d0(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime);
+void ps2___11TexturePackPCc_0x180788(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime);
+void AttachTextureTable__11TexturePackP11TextureInfoi_0x1808e0(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime);
+void AssignTextureData__11TexturePackPcii_0x1809f0(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime);
+void LoadTextureTableFromFile__11TexturePackPCc_0x180c18(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime);
 void GetLoadedTexture__11TexturePackUi_0x180b30(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime);
+void GetTextureInfo__FUii_0x180650(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime);
+void ps2____10NisManager_0x185b60(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime);
+void Start__10NisManageriiP3CarT3_0x185cf8(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime);
+void Load__10NisManageri_0x185ee0(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime);
+void StartAnimating__10NisManager_0x186228(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime);
+void Render__10NisManagerP5eView_0x1864a0(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime);
+void DrawNisObjects__FP5eView_0x186718(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime);
+void bOpen__FPCci_0x1f94d8(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime);
+void OpenPlatformFile__FPCc_0x1fb360(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime);
+void AddTail__t6bTList1Z14eActiveTextureP5bList_0x111738(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime);
+void Sort__5bListPFP5bNodeP5bNode_i_0x1f5680(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime);
+void BeginLoad__6bSoundPcT1_0x20c760(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime);
+void Open__12cBaseSpeakerPCcT1_0x217820(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime);
 
 namespace ps2_stubs
 {
@@ -90,11 +118,29 @@ namespace
         std::unordered_map<uint32_t, std::vector<uint32_t>> entriesByTextureId;
     };
 
-    std::optional<TexturePackIndexCache> &texturePackIndexCache()
+    struct TexturePackPayloadWindow
     {
-        static std::optional<TexturePackIndexCache> cache;
+        uint32_t dataAddr = 0u;
+        uint32_t dataSize = 0u;
+    };
+
+    std::unordered_map<uint32_t, TexturePackIndexCache> &texturePackIndexCache()
+    {
+        static std::unordered_map<uint32_t, TexturePackIndexCache> cache;
         return cache;
     }
+
+    std::unordered_map<uint32_t, TexturePackPayloadWindow> &texturePackPayloadWindows()
+    {
+        static std::unordered_map<uint32_t, TexturePackPayloadWindow> cache;
+        return cache;
+    }
+
+    void writeGuestU32Raw(uint8_t *rdram, uint32_t addr, uint32_t value);
+    uint32_t nfsBinPathHash(std::string path);
+    std::filesystem::path detectNfsHp2UnpackedRoot(const PS2Runtime::IoPaths &paths);
+    const std::unordered_map<uint32_t, std::filesystem::path> &getNfsHp2UnpackedHashIndex(
+        const std::filesystem::path &root);
 
     uint32_t readGuestU32Raw(uint8_t *rdram, uint32_t addr)
     {
@@ -103,6 +149,116 @@ namespace
                (static_cast<uint32_t>(rdram[masked + 1]) << 8) |
                (static_cast<uint32_t>(rdram[masked + 2]) << 16) |
                (static_cast<uint32_t>(rdram[masked + 3]) << 24);
+    }
+
+    uint8_t readGuestU8Raw(uint8_t *rdram, uint32_t addr)
+    {
+        if (!rdram)
+        {
+            return 0u;
+        }
+        return rdram[addr & PS2_RAM_MASK];
+    }
+
+    std::string readGuestCStringRaw(uint8_t *rdram, uint32_t addr, uint32_t maxLen = 0x200u)
+    {
+        if (!rdram || addr == 0u || maxLen == 0u)
+        {
+            return {};
+        }
+
+        std::string result;
+        result.reserve(std::min<uint32_t>(maxLen, 64u));
+        for (uint32_t i = 0; i < maxLen; ++i)
+        {
+            const uint8_t *guestPtr = getConstMemPtr(rdram, addr + i);
+            if (!guestPtr)
+            {
+                break;
+            }
+            const char ch = static_cast<char>(*guestPtr);
+            if (ch == '\0')
+            {
+                break;
+            }
+            result.push_back(ch);
+        }
+        return result;
+    }
+
+    std::array<uint8_t, 16> readGuestPreviewBytes(uint8_t *rdram, uint32_t addr)
+    {
+        std::array<uint8_t, 16> preview{};
+        if (!rdram || addr == 0u)
+        {
+            return preview;
+        }
+
+        for (size_t i = 0; i < preview.size(); ++i)
+        {
+            const uint8_t *guestPtr = getConstMemPtr(rdram, addr + static_cast<uint32_t>(i));
+            preview[i] = guestPtr ? *guestPtr : 0u;
+        }
+        return preview;
+    }
+
+    void mirrorScratchpadCStringToMaskedAlias(uint8_t *rdram,
+                                              uint32_t sourceAddr,
+                                              uint32_t maxLen = 0x100u)
+    {
+        if (!rdram || sourceAddr == 0u || maxLen == 0u || !ps2IsScratchpadAddress(sourceAddr))
+        {
+            return;
+        }
+
+        const uint32_t aliasBase = sourceAddr & PS2_RAM_MASK;
+        uint32_t copied = 0u;
+        for (; copied + 1u < maxLen; ++copied)
+        {
+            const uint8_t *guestPtr = getConstMemPtr(rdram, sourceAddr + copied);
+            const uint8_t value = guestPtr ? *guestPtr : 0u;
+            rdram[(aliasBase + copied) & PS2_RAM_MASK] = value;
+            if (value == 0u)
+            {
+                return;
+            }
+        }
+
+        rdram[(aliasBase + copied) & PS2_RAM_MASK] = 0u;
+    }
+
+    bool resolveNfsHp2UnpackedFile(const PS2Runtime::IoPaths &paths,
+                                   const std::string &sourcePath,
+                                   std::filesystem::path &hostPathOut)
+    {
+        if (sourcePath.empty())
+        {
+            return false;
+        }
+
+        const std::filesystem::path unpackedRoot = detectNfsHp2UnpackedRoot(paths);
+        if (unpackedRoot.empty())
+        {
+            return false;
+        }
+
+        std::filesystem::path hostPath = (unpackedRoot / std::filesystem::path(sourcePath)).lexically_normal();
+        std::error_code ec;
+        if (std::filesystem::exists(hostPath, ec) && !ec && std::filesystem::is_regular_file(hostPath, ec))
+        {
+            hostPathOut = hostPath;
+            return true;
+        }
+
+        const auto &hashIndex = getNfsHp2UnpackedHashIndex(unpackedRoot);
+        const auto found = hashIndex.find(nfsBinPathHash(sourcePath));
+        if (found == hashIndex.end())
+        {
+            return false;
+        }
+
+        hostPathOut = found->second;
+        return true;
     }
 
     bool buildTexturePackIndex(uint8_t *rdram,
@@ -162,11 +318,11 @@ namespace
             return true;
         }
 
-        auto &cacheOpt = texturePackIndexCache();
-        if (!cacheOpt.has_value() ||
-            cacheOpt->packAddr != packAddr ||
-            cacheOpt->tableAddr != tableAddr ||
-            cacheOpt->entryCount != entryCount)
+        auto &cacheMap = texturePackIndexCache();
+        auto cacheIt = cacheMap.find(packAddr);
+        if (cacheIt == cacheMap.end() ||
+            cacheIt->second.tableAddr != tableAddr ||
+            cacheIt->second.entryCount != entryCount)
         {
             TexturePackIndexCache rebuilt;
             if (!buildTexturePackIndex(rdram, packAddr, tableAddr, entryCount, rebuilt))
@@ -186,11 +342,11 @@ namespace
                 ++s_textureIndexLogCount;
             }
 
-            cacheOpt = std::move(rebuilt);
+            cacheIt = cacheMap.insert_or_assign(packAddr, std::move(rebuilt)).first;
         }
 
-        const auto found = cacheOpt->entriesByTextureId.find(textureId);
-        if (found == cacheOpt->entriesByTextureId.end())
+        const auto found = cacheIt->second.entriesByTextureId.find(textureId);
+        if (found == cacheIt->second.entriesByTextureId.end())
         {
             resultAddr = 0u;
             return true;
@@ -198,14 +354,35 @@ namespace
 
         for (const uint32_t entryAddr : found->second)
         {
-            const uint32_t field8c = readGuestU32Raw(rdram, entryAddr + 0x8Cu);
+            uint32_t field8c = readGuestU32Raw(rdram, entryAddr + 0x8Cu);
+            uint32_t field90 = readGuestU32Raw(rdram, entryAddr + 0x90u);
+            if (field8c == 0u)
+            {
+                const auto payloadIt = texturePackPayloadWindows().find(packAddr);
+                if (payloadIt != texturePackPayloadWindows().end())
+                {
+                    const uint32_t offset30 = readGuestU32Raw(rdram, entryAddr + 0x30u);
+                    const uint32_t offset34 = readGuestU32Raw(rdram, entryAddr + 0x34u);
+                    const TexturePackPayloadWindow &payload = payloadIt->second;
+                    if (offset30 < payload.dataSize)
+                    {
+                        field8c = payload.dataAddr + offset30;
+                        writeGuestU32Raw(rdram, entryAddr + 0x8Cu, field8c);
+                    }
+                    if (offset34 < payload.dataSize)
+                    {
+                        field90 = payload.dataAddr + offset34;
+                        writeGuestU32Raw(rdram, entryAddr + 0x90u, field90);
+                    }
+                }
+            }
+
             if (field8c == 0u)
             {
                 continue;
             }
 
             const uint32_t field3c = readGuestU32Raw(rdram, entryAddr + 0x3Cu);
-            const uint32_t field90 = readGuestU32Raw(rdram, entryAddr + 0x90u);
             if (field3c == 0u || field90 != 0u)
             {
                 resultAddr = entryAddr;
@@ -215,6 +392,57 @@ namespace
 
         resultAddr = 0u;
         return true;
+    }
+
+    void writeGuestU32Raw(uint8_t *rdram, uint32_t addr, uint32_t value)
+    {
+        uint8_t *dst = &rdram[addr & PS2_RAM_MASK];
+        dst[0] = static_cast<uint8_t>((value >> 0) & 0xFFu);
+        dst[1] = static_cast<uint8_t>((value >> 8) & 0xFFu);
+        dst[2] = static_cast<uint8_t>((value >> 16) & 0xFFu);
+        dst[3] = static_cast<uint8_t>((value >> 24) & 0xFFu);
+    }
+
+    void initializeGuestListSentinel(uint8_t *rdram, uint32_t sentinelAddr)
+    {
+        if (!rdram || sentinelAddr == 0u)
+        {
+            return;
+        }
+
+        writeGuestU32Raw(rdram, sentinelAddr + 0x0u, sentinelAddr);
+        writeGuestU32Raw(rdram, sentinelAddr + 0x4u, sentinelAddr);
+    }
+
+    void insertGuestNodeAtListHead(uint8_t *rdram, uint32_t sentinelAddr, uint32_t nodeAddr)
+    {
+        if (!rdram || sentinelAddr == 0u || nodeAddr == 0u || sentinelAddr == nodeAddr)
+        {
+            return;
+        }
+
+        uint32_t currentHead = readGuestU32Raw(rdram, sentinelAddr + 0x0u);
+        uint32_t currentTail = readGuestU32Raw(rdram, sentinelAddr + 0x4u);
+        if (currentHead == 0u || currentTail == 0u)
+        {
+            initializeGuestListSentinel(rdram, sentinelAddr);
+            currentHead = sentinelAddr;
+            currentTail = sentinelAddr;
+        }
+
+        if (currentHead == nodeAddr || currentTail == nodeAddr)
+        {
+            return;
+        }
+
+        writeGuestU32Raw(rdram, nodeAddr + 0x0u, currentHead);
+        writeGuestU32Raw(rdram, nodeAddr + 0x4u, sentinelAddr);
+        writeGuestU32Raw(rdram, currentHead + 0x4u, nodeAddr);
+        writeGuestU32Raw(rdram, sentinelAddr + 0x0u, nodeAddr);
+        if (currentTail == sentinelAddr)
+        {
+            writeGuestU32Raw(rdram, sentinelAddr + 0x4u, nodeAddr);
+        }
     }
 
     uint32_t readLeU32(const uint8_t *src)
@@ -1015,6 +1243,595 @@ label_1fa834:
         runtime->requestStop();
     }
 
+    void nfsHp2AlphaUpdateCameraCoordinatorsContinuation(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        if (!rdram || !ctx || !runtime)
+        {
+            if (runtime)
+            {
+                runtime->requestStop();
+            }
+            return;
+        }
+
+        const auto readGuestU32 = [&](uint32_t addr) -> uint32_t
+        {
+            return readLeU32(rdram + (addr & PS2_RAM_MASK));
+        };
+        const auto readGuestU64 = [&](uint32_t addr) -> uint64_t
+        {
+            const uint32_t lo = readLeU32(rdram + (addr & PS2_RAM_MASK));
+            const uint32_t hi = readLeU32(rdram + (ADD32(addr, 4u) & PS2_RAM_MASK));
+            return static_cast<uint64_t>(lo) | (static_cast<uint64_t>(hi) << 32);
+        };
+
+        switch (ctx->pc)
+        {
+        case 0x170B50u:
+            SET_GPR_S32(ctx, 16, static_cast<int32_t>(readGuestU32(ADD32(GPR_U32(ctx, 16), 0u))));
+            [[fallthrough]];
+
+        case 0x170B54u:
+            if (GPR_U64(ctx, 16) != GPR_U64(ctx, 17))
+            {
+                SET_GPR_S32(ctx, 2, static_cast<int32_t>(readGuestU32(ADD32(GPR_U32(ctx, 16), 0xCu))));
+                ctx->pc = 0x170B30u;
+                return;
+            }
+            [[fallthrough]];
+
+        case 0x170B5Cu:
+        {
+            const uint32_t savedSp = GPR_U32(ctx, 29);
+            const uint64_t savedRa = readGuestU64(ADD32(savedSp, 0x20u));
+            const uint64_t savedS1 = readGuestU64(ADD32(savedSp, 0x10u));
+            const uint64_t savedS0 = readGuestU64(ADD32(savedSp, 0x00u));
+            const uint32_t savedF20Bits = readGuestU32(ADD32(savedSp, 0x30u));
+            float savedF20 = 0.0f;
+            std::memcpy(&savedF20, &savedF20Bits, sizeof(savedF20));
+
+            SET_GPR_U64(ctx, 31, savedRa);
+            SET_GPR_U64(ctx, 17, savedS1);
+            SET_GPR_U64(ctx, 16, savedS0);
+            ctx->f[20] = savedF20;
+            SET_GPR_S32(ctx, 29, static_cast<int32_t>(ADD32(savedSp, 0x40u)));
+            ctx->pc = GPR_U32(ctx, 31);
+            return;
+        }
+
+        default:
+            std::cerr << "[nfs-hp2-alpha] unexpected UpdateCameraCoordinators continuation pc=0x"
+                      << std::hex << ctx->pc
+                      << " ra=0x" << getRegU32(ctx, 31)
+                      << " sp=0x" << getRegU32(ctx, 29)
+                      << std::dec << std::endl;
+            runtime->requestStop();
+            return;
+        }
+    }
+
+    void nfsHp2AlphaUpdateCameraCoordinators(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        if (!rdram || !ctx || !runtime)
+        {
+            if (runtime)
+            {
+                runtime->requestStop();
+            }
+            return;
+        }
+
+        const float deltaSeconds = ctx->f[12];
+        const uint32_t sentinel = getRegU32(ctx, 28) - 0x5A70u;
+        const auto readGuestU32 = [&](uint32_t addr) -> uint32_t
+        {
+            return readLeU32(rdram + (addr & PS2_RAM_MASK));
+        };
+        const auto readGuestS16 = [&](uint32_t addr) -> int32_t
+        {
+            const uint32_t masked = addr & PS2_RAM_MASK;
+            const uint16_t value = static_cast<uint16_t>(rdram[masked + 0]) |
+                                   (static_cast<uint16_t>(rdram[masked + 1]) << 8);
+            return static_cast<int16_t>(value);
+        };
+
+        std::unordered_set<uint32_t> seen;
+        seen.reserve(32u);
+
+        uint32_t node = readGuestU32(sentinel);
+        uint32_t iterations = 0u;
+        while (node != sentinel && node != 0u && iterations < 256u)
+        {
+            if (!seen.insert(node).second)
+            {
+                std::cerr << "[nfs-hp2-alpha] camera coordinator cycle detected"
+                          << " sentinel=0x" << std::hex << sentinel
+                          << " node=0x" << node
+                          << " next=0x" << readGuestU32(node + 0u)
+                          << std::dec << std::endl;
+                break;
+            }
+
+            if (readGuestU32(node + 0x0Cu) == 0u)
+            {
+                const uint32_t descriptor = readGuestU32(node + 0x18u);
+                if (descriptor != 0u)
+                {
+                    const int32_t offset = readGuestS16(descriptor + 0x10u);
+                    const uint32_t callback = readGuestU32(descriptor + 0x14u);
+                    if (callback >= 0x1000u && runtime->hasFunction(callback))
+                    {
+                        ctx->f[12] = deltaSeconds;
+                        SET_GPR_U64(ctx, 4, ADD32(node, static_cast<uint32_t>(offset)));
+                        ctx->pc = callback;
+                        auto targetFn = runtime->lookupFunction(callback);
+                        targetFn(rdram, ctx, runtime);
+                    }
+                    else
+                    {
+                        static uint32_t loggedInvalidCallbackCount = 0u;
+                        if (loggedInvalidCallbackCount < 16u)
+                        {
+                            std::cerr << "[nfs-hp2-alpha] skipped invalid camera callback"
+                                      << " node=0x" << std::hex << node
+                                      << " descriptor=0x" << descriptor
+                                      << " callback=0x" << callback
+                                      << " offset=0x" << static_cast<uint32_t>(offset & 0xFFFF)
+                                      << std::dec << std::endl;
+                            ++loggedInvalidCallbackCount;
+                        }
+                    }
+                }
+            }
+
+            node = readGuestU32(node + 0u);
+            ++iterations;
+        }
+
+        ctx->f[12] = deltaSeconds;
+        ctx->pc = getRegU32(ctx, 31);
+    }
+
+    void nfsHp2AlphaRenderCameraMovers(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        if (!rdram || !ctx || !runtime)
+        {
+            if (runtime)
+            {
+                runtime->requestStop();
+            }
+            return;
+        }
+
+        const uint32_t wantedView = getRegU32(ctx, 4);
+        const uint32_t gp = getRegU32(ctx, 28);
+        const uint32_t sentinel = ADD32(gp, 4294942552u);
+        const auto readGuestU32 = [&](uint32_t addr) -> uint32_t
+        {
+            return readGuestU32Raw(rdram, addr);
+        };
+        const auto readGuestS16 = [&](uint32_t addr) -> int32_t
+        {
+            const uint32_t value = readGuestU32Raw(rdram, addr & ~0x1u);
+            return static_cast<int16_t>((addr & 0x2u) ? (value >> 16) : (value & 0xFFFFu));
+        };
+
+        std::unordered_set<uint32_t> seen;
+        seen.reserve(32u);
+
+        uint32_t node = readGuestU32(sentinel);
+        uint32_t iterations = 0u;
+        while (node != sentinel && node != 0u && iterations < 256u)
+        {
+            if (!seen.insert(node).second)
+            {
+                std::cerr << "[nfs-hp2-alpha] camera mover render cycle detected"
+                          << " sentinel=0x" << std::hex << sentinel
+                          << " node=0x" << node
+                          << " next=0x" << readGuestU32(node + 0u)
+                          << std::dec << std::endl;
+                break;
+            }
+
+            const uint32_t viewIndex = readGuestU32(node + 0x0Cu);
+            const uint32_t viewAddr = 0x00260B30u + (viewIndex * 0x60u);
+            if (viewAddr == wantedView)
+            {
+                const uint32_t descriptor = readGuestU32(node + 0x28u);
+                if (descriptor != 0u)
+                {
+                    const int32_t offset = readGuestS16(descriptor + 0x18u);
+                    const uint32_t callback = readGuestU32(descriptor + 0x1Cu);
+                    if (callback >= 0x1000u && runtime->hasFunction(callback))
+                    {
+                        SET_GPR_U64(ctx, 4, ADD32(node, static_cast<uint32_t>(offset)));
+                        ctx->pc = callback;
+                        runtime->lookupFunction(callback)(rdram, ctx, runtime);
+                    }
+                }
+            }
+
+            node = readGuestU32(node + 0u);
+            ++iterations;
+        }
+
+        SET_GPR_U32(ctx, 4, wantedView);
+        ctx->pc = getRegU32(ctx, 31);
+    }
+
+    void nfsHp2AlphaUpdateCameraMovers(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        if (!rdram || !ctx || !runtime)
+        {
+            if (runtime)
+            {
+                runtime->requestStop();
+            }
+            return;
+        }
+
+        const uint32_t gp = getRegU32(ctx, 28);
+        const uint32_t sentinel = ADD32(gp, 4294942552u);
+        const auto readGuestU32 = [&](uint32_t addr) -> uint32_t
+        {
+            return readGuestU32Raw(rdram, addr);
+        };
+        const auto readGuestS16 = [&](uint32_t addr) -> int32_t
+        {
+            const uint32_t value = readGuestU32Raw(rdram, addr & ~0x1u);
+            return static_cast<int16_t>((addr & 0x2u) ? (value >> 16) : (value & 0xFFFFu));
+        };
+
+        std::unordered_set<uint32_t> seen;
+        seen.reserve(32u);
+
+        uint32_t node = readGuestU32(sentinel);
+        uint32_t iterations = 0u;
+        while (node != sentinel && node != 0u && iterations < 256u)
+        {
+            if (!seen.insert(node).second)
+            {
+                std::cerr << "[nfs-hp2-alpha] camera mover update cycle detected"
+                          << " sentinel=0x" << std::hex << sentinel
+                          << " node=0x" << node
+                          << " next=0x" << readGuestU32(node + 0u)
+                          << std::dec << std::endl;
+                break;
+            }
+
+            const uint32_t viewIndex = readGuestU32(node + 0x0Cu);
+            const uint32_t viewAddr = 0x00260B30u + (viewIndex * 0x60u);
+            if (readGuestU32(viewAddr + 0x38u) == node)
+            {
+                const uint32_t descriptor = readGuestU32(node + 0x28u);
+                if (descriptor != 0u)
+                {
+                    const int32_t offset = readGuestS16(descriptor + 0x10u);
+                    const uint32_t callback = readGuestU32(descriptor + 0x14u);
+                    if (callback >= 0x1000u && runtime->hasFunction(callback))
+                    {
+                        SET_GPR_U64(ctx, 4, ADD32(node, static_cast<uint32_t>(offset)));
+                        ctx->pc = callback;
+                        runtime->lookupFunction(callback)(rdram, ctx, runtime);
+                    }
+                }
+            }
+
+            node = readGuestU32(node + 0u);
+            ++iterations;
+        }
+
+        ctx->pc = getRegU32(ctx, 31);
+    }
+
+    void nfsHp2AlphaGetLightMaterial(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        if (!rdram || !ctx || !runtime)
+        {
+            if (runtime)
+            {
+                runtime->requestStop();
+            }
+            return;
+        }
+
+        const uint32_t wantedId = getRegU32(ctx, 4);
+        const uint32_t gp = getRegU32(ctx, 28);
+        const uint32_t sentinel = ADD32(gp, 4294940704u);
+        constexpr uint32_t kWildcardId = 0x2C420D64u;
+
+        std::unordered_set<uint32_t> seen;
+        seen.reserve(64u);
+
+        uint32_t fallback = 0u;
+        uint32_t node = readGuestU32Raw(rdram, sentinel);
+        uint32_t iterations = 0u;
+        while (node != 0u && node != sentinel && iterations < 2048u)
+        {
+            if (!seen.insert(node).second)
+            {
+                static uint32_t s_cycleLogCount = 0u;
+                if (s_cycleLogCount < 12u)
+                {
+                    std::cerr << "[nfs-hp2-alpha] light material list cycle detected"
+                              << " sentinel=0x" << std::hex << sentinel
+                              << " wanted=0x" << wantedId
+                              << " node=0x" << node
+                              << " next=0x" << readGuestU32Raw(rdram, node + 0x0u)
+                              << " id=0x" << readGuestU32Raw(rdram, node + 0x8u)
+                              << std::dec << std::endl;
+                    ++s_cycleLogCount;
+                }
+                break;
+            }
+
+            const uint32_t materialId = readGuestU32Raw(rdram, node + 0x8u);
+            if (materialId == wantedId)
+            {
+                setReturnU32(ctx, node);
+                ctx->pc = getRegU32(ctx, 31);
+                return;
+            }
+
+            if (materialId == kWildcardId)
+            {
+                fallback = node;
+            }
+
+            node = readGuestU32Raw(rdram, node + 0x0u);
+            ++iterations;
+        }
+
+        if (iterations >= 2048u)
+        {
+            static uint32_t s_runawayLogCount = 0u;
+            if (s_runawayLogCount < 12u)
+            {
+                std::cerr << "[nfs-hp2-alpha] light material list runaway"
+                          << " sentinel=0x" << std::hex << sentinel
+                          << " wanted=0x" << wantedId
+                          << " lastNode=0x" << node
+                          << std::dec << std::endl;
+                ++s_runawayLogCount;
+            }
+        }
+
+        setReturnU32(ctx, fallback);
+        ctx->pc = getRegU32(ctx, 31);
+    }
+
+    void nfsHp2AlphaSortFlailerObjectList(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        if (!rdram || !ctx || !runtime)
+        {
+            if (runtime)
+            {
+                runtime->requestStop();
+            }
+            return;
+        }
+
+        const uint32_t sentinel = getRegU32(ctx, 4);
+        if (sentinel == 0u)
+        {
+            ctx->pc = getRegU32(ctx, 31);
+            return;
+        }
+
+        std::vector<uint32_t> nodes;
+        nodes.reserve(128u);
+        std::unordered_set<uint32_t> seen;
+        seen.reserve(128u);
+
+        uint32_t node = readGuestU32Raw(rdram, sentinel + 0x0u);
+        bool cycleDetected = false;
+        while (node != 0u && node != sentinel && nodes.size() < 4096u)
+        {
+            if (!seen.insert(node).second)
+            {
+                cycleDetected = true;
+                break;
+            }
+
+            nodes.push_back(node);
+            node = readGuestU32Raw(rdram, node + 0x0u);
+        }
+
+        if (node != 0u && node != sentinel && !cycleDetected && nodes.size() >= 4096u)
+        {
+            static uint32_t s_runawayLogCount = 0u;
+            if (s_runawayLogCount < 8u)
+            {
+                std::cerr << "[nfs-hp2-alpha] flailer sort runaway"
+                          << " sentinel=0x" << std::hex << sentinel
+                          << " count=0x" << nodes.size()
+                          << " last=0x" << node
+                          << std::dec << std::endl;
+                ++s_runawayLogCount;
+            }
+            ctx->pc = getRegU32(ctx, 31);
+            return;
+        }
+
+        if (cycleDetected)
+        {
+            static uint32_t s_cycleLogCount = 0u;
+            if (s_cycleLogCount < 8u)
+            {
+                std::cerr << "[nfs-hp2-alpha] flailer sort cycle detected"
+                          << " sentinel=0x" << std::hex << sentinel
+                          << " repeated=0x" << node
+                          << " count=0x" << nodes.size()
+                          << std::dec << std::endl;
+                ++s_cycleLogCount;
+            }
+        }
+
+        std::stable_sort(nodes.begin(), nodes.end(), [&](uint32_t lhs, uint32_t rhs) {
+            const int32_t lhsOrder = static_cast<int32_t>(static_cast<int8_t>(readGuestU8Raw(rdram, lhs + 0x12u)));
+            const int32_t rhsOrder = static_cast<int32_t>(static_cast<int8_t>(readGuestU8Raw(rdram, rhs + 0x12u)));
+            return lhsOrder <= rhsOrder;
+        });
+
+        if (nodes.empty())
+        {
+            writeGuestU32Raw(rdram, sentinel + 0x0u, sentinel);
+            writeGuestU32Raw(rdram, sentinel + 0x4u, sentinel);
+            ctx->pc = getRegU32(ctx, 31);
+            return;
+        }
+
+        for (size_t i = 0; i < nodes.size(); ++i)
+        {
+            const uint32_t current = nodes[i];
+            const uint32_t next = (i + 1u < nodes.size()) ? nodes[i + 1u] : sentinel;
+            const uint32_t prev = (i == 0u) ? sentinel : nodes[i - 1u];
+            writeGuestU32Raw(rdram, current + 0x0u, next);
+            writeGuestU32Raw(rdram, current + 0x4u, prev);
+        }
+
+        writeGuestU32Raw(rdram, sentinel + 0x0u, nodes.front());
+        writeGuestU32Raw(rdram, sentinel + 0x4u, nodes.back());
+
+        static uint32_t s_logCount = 0u;
+        if (s_logCount < 8u)
+        {
+            const uint32_t first = nodes.front();
+            const uint32_t last = nodes.back();
+            std::cerr << "[nfs-hp2-alpha] sorted flailer list"
+                      << " sentinel=0x" << std::hex << sentinel
+                      << " count=0x" << nodes.size()
+                      << " first=0x" << first
+                      << " firstOrder=0x" << static_cast<uint32_t>(readGuestU8Raw(rdram, first + 0x12u))
+                      << " last=0x" << last
+                      << " lastOrder=0x" << static_cast<uint32_t>(readGuestU8Raw(rdram, last + 0x12u))
+                      << std::dec << std::endl;
+            ++s_logCount;
+        }
+
+        ctx->pc = getRegU32(ctx, 31);
+    }
+
+    void nfsHp2AlphaSortBList(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        if (!rdram || !ctx || !runtime)
+        {
+            if (runtime)
+            {
+                runtime->requestStop();
+            }
+            return;
+        }
+
+        const uint32_t entryPc = ctx->pc;
+        const uint32_t compareFn = getRegU32(ctx, 5);
+        if (compareFn == 0x134188u)
+        {
+            static uint32_t s_logCount = 0u;
+            if (s_logCount < 8u)
+            {
+                std::cerr << "[nfs-hp2-alpha] intercepted generic bList sort for flailer objects"
+                          << " sentinel=0x" << std::hex << getRegU32(ctx, 4)
+                          << " compare=0x" << compareFn
+                          << " ra=0x" << getRegU32(ctx, 31)
+                          << std::dec << std::endl;
+                ++s_logCount;
+            }
+
+            nfsHp2AlphaSortFlailerObjectList(rdram, ctx, runtime);
+            if (ctx->pc == entryPc)
+            {
+                ctx->pc = getRegU32(ctx, 31);
+            }
+            return;
+        }
+
+        Sort__5bListPFP5bNodeP5bNode_i_0x1f5680(rdram, ctx, runtime);
+        if (ctx->pc == entryPc)
+        {
+            ctx->pc = getRegU32(ctx, 31);
+        }
+    }
+
+    void nfsHp2AlphaAddTexturesSorted(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        if (!rdram || !ctx || !runtime)
+        {
+            if (runtime)
+            {
+                runtime->requestStop();
+            }
+            return;
+        }
+
+        const uint32_t entryPc = ctx->pc;
+        const uint32_t downloaderAddr = getRegU32(ctx, 4);
+        const uint32_t sourceListAddr = getRegU32(ctx, 5);
+        const uint32_t destListAddr = ADD32(downloaderAddr, 0x14u);
+        const bool downloaderScratch = ps2IsScratchpadAddress(downloaderAddr);
+        const bool destScratch = ps2IsScratchpadAddress(destListAddr);
+        const bool sourceScratch = ps2IsScratchpadAddress(sourceListAddr);
+        const uint32_t sourceHead = (sourceListAddr < kPs2RdramSize) ? readGuestU32Raw(rdram, sourceListAddr + 0x0u) : 0u;
+        const uint32_t sourceTail = (sourceListAddr < kPs2RdramSize) ? readGuestU32Raw(rdram, sourceListAddr + 0x4u) : 0u;
+        const uint32_t destHead = (destListAddr < kPs2RdramSize) ? readGuestU32Raw(rdram, destListAddr + 0x0u) : 0u;
+        const uint32_t destTail = (destListAddr < kPs2RdramSize) ? readGuestU32Raw(rdram, destListAddr + 0x4u) : 0u;
+
+        static uint32_t s_logCount = 0u;
+        if (s_logCount < 8u)
+        {
+            std::cerr << "[nfs-hp2-alpha] AddTexturesSorted intercept"
+                      << " downloader=0x" << std::hex << downloaderAddr
+                      << " source=0x" << sourceListAddr
+                      << " sourceHead=0x" << sourceHead
+                      << " sourceTail=0x" << sourceTail
+                      << " dest=0x" << destListAddr
+                      << " destHead=0x" << destHead
+                      << " destTail=0x" << destTail
+                      << " downloaderScratch=" << (downloaderScratch ? 1 : 0)
+                      << " sourceScratch=" << (sourceScratch ? 1 : 0)
+                      << " destScratch=" << (destScratch ? 1 : 0)
+                      << std::dec << std::endl;
+            ++s_logCount;
+        }
+
+        const bool sourceLooksEmpty = (sourceHead == 0u && sourceTail == 0u);
+        const bool invalidListAddr = (sourceListAddr == 0u || sourceListAddr >= kPs2RdramSize ||
+                                      destListAddr == 0u || destListAddr >= kPs2RdramSize);
+        if (downloaderScratch || sourceScratch || destScratch || sourceLooksEmpty || invalidListAddr)
+        {
+            static uint32_t s_skipLogCount = 0u;
+            if (s_skipLogCount < 12u)
+            {
+                std::cerr << "[nfs-hp2-alpha] AddTexturesSorted skip fallback"
+                          << " downloader=0x" << std::hex << downloaderAddr
+                          << " source=0x" << sourceListAddr
+                          << " dest=0x" << destListAddr
+                          << " reason="
+                          << (downloaderScratch ? "downloader-scratch " : "")
+                          << (sourceScratch ? "source-scratch " : "")
+                          << (destScratch ? "dest-scratch " : "")
+                          << (sourceLooksEmpty ? "source-empty " : "")
+                          << (invalidListAddr ? "invalid-list-addr" : "")
+                          << std::dec << std::endl;
+                ++s_skipLogCount;
+            }
+
+            if (ctx->pc == entryPc)
+            {
+                ctx->pc = getRegU32(ctx, 31);
+            }
+            return;
+        }
+
+        SET_GPR_U32(ctx, 4, destListAddr);
+        SET_GPR_U32(ctx, 5, sourceListAddr);
+        AddTail__t6bTList1Z14eActiveTextureP5bList_0x111738(rdram, ctx, runtime);
+        if (ctx->pc == entryPc)
+        {
+            ctx->pc = getRegU32(ctx, 31);
+        }
+    }
+
     void nfsHp2AlphaTempDirectoryEntryCtor(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     {
         if (!rdram || !ctx || !runtime)
@@ -1447,6 +2264,173 @@ label_1fa834:
         ctx->pc = getRegU32(ctx, 31);
     }
 
+    void nfsHp2AlphaFindScannerConfig(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        if (!rdram || !ctx)
+        {
+            if (ctx)
+            {
+                setReturnU32(ctx, 0u);
+                ctx->pc = getRegU32(ctx, 31);
+            }
+            if (runtime)
+            {
+                runtime->requestStop();
+            }
+            return;
+        }
+
+        const uint32_t wantedEvent = getRegU32(ctx, 4);
+        const uint32_t wantedPort = getRegU32(ctx, 5);
+        const auto readGuestU32 = [&](uint32_t addr) -> uint32_t
+        {
+            return readLeU32(rdram + (addr & PS2_RAM_MASK));
+        };
+        const auto readGuestS8 = [&](uint32_t addr) -> int32_t
+        {
+            return static_cast<int8_t>(rdram[addr & PS2_RAM_MASK]);
+        };
+
+        constexpr uint32_t kScannerTableBase = 0x28F180u;
+        constexpr uint32_t kScannerStride = 0x24u;
+        constexpr uint32_t kScannerSlotCount = 8u;
+        constexpr int32_t kScannerSentinel = -1;
+        constexpr uint32_t kExpectedMaxScannerConfigs = 64u;
+
+        uint32_t scannerCount = readGuestU32(getRegU32(ctx, 28) - 0x6660u);
+        if (scannerCount > kExpectedMaxScannerConfigs)
+        {
+            static bool loggedBadCount = false;
+            if (!loggedBadCount)
+            {
+                std::cerr << "[nfs-hp2-alpha] clamped suspicious scanner config count"
+                          << " count=0x" << std::hex << scannerCount
+                          << " gp=0x" << getRegU32(ctx, 28)
+                          << " wantedEvent=0x" << wantedEvent
+                          << " wantedPort=0x" << wantedPort
+                          << std::dec << std::endl;
+                loggedBadCount = true;
+            }
+            scannerCount = kExpectedMaxScannerConfigs;
+        }
+
+        for (uint32_t i = 0; i < scannerCount; ++i)
+        {
+            const uint32_t row = kScannerTableBase + (i * kScannerStride);
+            if (readGuestU32(row + 8u) != wantedEvent)
+            {
+                continue;
+            }
+
+            bool match = false;
+            for (uint32_t slot = 0; slot < kScannerSlotCount; ++slot)
+            {
+                const int32_t value = readGuestS8(row + slot);
+                if (wantedPort != 0u)
+                {
+                    if (value == static_cast<int32_t>(wantedPort) || value == kScannerSentinel)
+                    {
+                        match = true;
+                        break;
+                    }
+                }
+                else
+                {
+                    if ((wantedEvent == 1u && value == 1) || value == kScannerSentinel || value == 0)
+                    {
+                        match = true;
+                        break;
+                    }
+                }
+            }
+
+            if (match)
+            {
+                setReturnU32(ctx, row);
+                ctx->pc = getRegU32(ctx, 31);
+                return;
+            }
+        }
+
+        static uint32_t missLogCount = 0u;
+        if (missLogCount < 8u)
+        {
+            std::cerr << "[nfs-hp2-alpha] FindScannerConfig miss"
+                      << " wantedEvent=0x" << std::hex << wantedEvent
+                      << " wantedPort=0x" << wantedPort
+                      << " count=0x" << scannerCount
+                      << std::dec << std::endl;
+            ++missLogCount;
+        }
+
+        setReturnU32(ctx, 0u);
+        ctx->pc = getRegU32(ctx, 31);
+    }
+
+    void nfsHp2AlphaGenerateEventsFromScanners(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        if (!rdram || !ctx)
+        {
+            if (runtime)
+            {
+                runtime->requestStop();
+            }
+            return;
+        }
+
+        const uint32_t joystickAddr = getRegU32(ctx, 4);
+        const uint32_t requestedConfig = getRegU32(ctx, 5);
+        const auto readGuestU32 = [&](uint32_t addr) -> uint32_t
+        {
+            return readLeU32(rdram + (addr & PS2_RAM_MASK));
+        };
+        const auto writeGuestU32 = [&](uint32_t addr, uint32_t value)
+        {
+            writeLeU32(rdram + (addr & PS2_RAM_MASK), value);
+        };
+
+        if (joystickAddr != 0u)
+        {
+            const uint32_t currentConfig = readGuestU32(joystickAddr + 0x1Cu);
+            const uint32_t pendingConfig = readGuestU32(joystickAddr + 0x20u);
+            uint32_t pendingTicks = readGuestU32(joystickAddr + 0x24u);
+
+            if (requestedConfig != currentConfig)
+            {
+                if (requestedConfig == pendingConfig)
+                {
+                    ++pendingTicks;
+                    if (pendingTicks >= 10u)
+                    {
+                        writeGuestU32(joystickAddr + 0x1Cu, requestedConfig);
+                        writeGuestU32(joystickAddr + 0x24u, 0u);
+                    }
+                    else
+                    {
+                        writeGuestU32(joystickAddr + 0x24u, pendingTicks);
+                    }
+                }
+                else
+                {
+                    writeGuestU32(joystickAddr + 0x20u, requestedConfig);
+                    writeGuestU32(joystickAddr + 0x24u, 0u);
+                }
+            }
+        }
+
+        static bool logged = false;
+        if (!logged)
+        {
+            std::cerr << "[nfs-hp2-alpha] bypassed GenerateEventsFromScanners"
+                      << " joystick=0x" << std::hex << joystickAddr
+                      << " requestedConfig=0x" << requestedConfig
+                      << std::dec << std::endl;
+            logged = true;
+        }
+
+        ctx->pc = getRegU32(ctx, 31);
+    }
+
     void nfsHp2AlphaBeginReadQueuedFile(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     {
         if (!rdram || !ctx || !runtime)
@@ -1843,16 +2827,1893 @@ label_1fa834:
         }
     }
 
+    void nfsHp2AlphaGetTextureInfo(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        if (!rdram || !ctx || !runtime)
+        {
+            if (runtime)
+            {
+                runtime->requestStop();
+            }
+            return;
+        }
+
+        const uint32_t entryPc = ctx->pc;
+        const uint32_t wantedTextureId = getRegU32(ctx, 4);
+        const uint32_t gp = getRegU32(ctx, 28);
+        const uint32_t sentinel = gp - 0x5808u;
+        uint32_t current = readGuestU32Raw(rdram, sentinel + 0x0u);
+        uint32_t resultAddr = 0u;
+
+        for (uint32_t walked = 0u; current != 0u && current != sentinel && walked < 0x200u; ++walked)
+        {
+            if (current >= kPs2RdramSize)
+            {
+                break;
+            }
+            if (!tryLookupLoadedTextureFast(rdram, current, wantedTextureId, resultAddr))
+            {
+                break;
+            }
+            if (resultAddr != 0u)
+            {
+                setReturnU32(ctx, resultAddr);
+                ctx->pc = entryPc;
+                return;
+            }
+            current = readGuestU32Raw(rdram, current + 0x0u);
+        }
+
+        for (uint32_t i = 0u; i < 13u; ++i)
+        {
+            const uint32_t renderTargetAddr = 0x0027ED80u + (i * 0x500u);
+            const uint32_t renderTargetIndex = readGuestU32Raw(rdram, renderTargetAddr + 0x0u);
+            const uint32_t textureInfoAddr = 0x00260270u + (renderTargetIndex * kTextureInfoStride);
+            if (readGuestU32Raw(rdram, textureInfoAddr + 0x20u) == wantedTextureId)
+            {
+                setReturnU32(ctx, textureInfoAddr);
+                ctx->pc = entryPc;
+                return;
+            }
+        }
+
+        static uint32_t s_missLogCount = 0u;
+        if (s_missLogCount < 16u)
+        {
+            std::cerr << "[nfs-hp2-alpha] GetTextureInfo miss"
+                      << " wanted=0x" << std::hex << wantedTextureId
+                      << " listHead=0x" << readGuestU32Raw(rdram, sentinel + 0x0u)
+                      << " sentinel=0x" << sentinel
+                      << std::dec << std::endl;
+            ++s_missLogCount;
+        }
+
+        setReturnU32(ctx, 0u);
+        ctx->pc = entryPc;
+    }
+
+    bool tryResolveTextureInfoFast(uint8_t *rdram, uint32_t gp, uint32_t wantedTextureId, uint32_t &resultAddr)
+    {
+        const uint32_t sentinel = gp - 0x5808u;
+        uint32_t current = readGuestU32Raw(rdram, sentinel + 0x0u);
+        resultAddr = 0u;
+
+        for (uint32_t walked = 0u; current != 0u && current != sentinel && walked < 0x200u; ++walked)
+        {
+            if (current >= kPs2RdramSize)
+            {
+                break;
+            }
+            if (!tryLookupLoadedTextureFast(rdram, current, wantedTextureId, resultAddr))
+            {
+                return false;
+            }
+            if (resultAddr != 0u)
+            {
+                return true;
+            }
+            current = readGuestU32Raw(rdram, current + 0x0u);
+        }
+
+        for (uint32_t i = 0u; i < 13u; ++i)
+        {
+            const uint32_t renderTargetAddr = 0x0027ED80u + (i * 0x500u);
+            const uint32_t renderTargetIndex = readGuestU32Raw(rdram, renderTargetAddr + 0x0u);
+            const uint32_t textureInfoAddr = 0x00260270u + (renderTargetIndex * kTextureInfoStride);
+            if (readGuestU32Raw(rdram, textureInfoAddr + 0x20u) == wantedTextureId)
+            {
+                resultAddr = textureInfoAddr;
+                return true;
+            }
+        }
+
+        return true;
+    }
+
+    bool isLikelyPoisonTextureId(uint32_t value)
+    {
+        if (value == 0u || value == 0xFFFFFFFFu)
+        {
+            return false;
+        }
+
+        const uint8_t b0 = static_cast<uint8_t>(value >> 0);
+        const uint8_t b1 = static_cast<uint8_t>(value >> 8);
+        const uint8_t b2 = static_cast<uint8_t>(value >> 16);
+        const uint8_t b3 = static_cast<uint8_t>(value >> 24);
+        const bool allEe = (b0 == 0xEEu && b1 == 0xEEu && b2 == 0xEEu && b3 == 0xEEu);
+        const bool mostlyEe = (b1 == 0xEEu && b2 == 0xEEu && b3 == 0xEEu);
+        const bool allAa = (b0 == 0xAAu && b1 == 0xAAu && b2 == 0xAAu && b3 == 0xAAu);
+        return allEe || mostlyEe || allAa;
+    }
+
+    bool looksLikePrintableAsciiWord(uint32_t value)
+    {
+        for (int shift = 0; shift < 32; shift += 8)
+        {
+            const uint8_t ch = static_cast<uint8_t>((value >> shift) & 0xFFu);
+            if (ch == 0u)
+            {
+                return false;
+            }
+            if (ch < 0x20u || ch > 0x7Eu)
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    bool isLikelyModelReconnectTable(uint32_t entryBase, uint32_t entryCount)
+    {
+        if (entryBase == 0u && entryCount == 0u)
+        {
+            return true;
+        }
+
+        if (entryBase == 0u || entryBase >= kPs2RdramSize)
+        {
+            return false;
+        }
+
+        if (entryCount > 0x80u)
+        {
+            return false;
+        }
+
+        const uint64_t end = static_cast<uint64_t>(entryBase) + (static_cast<uint64_t>(entryCount) * 0x1Cu);
+        if (end > kPs2RdramSize)
+        {
+            return false;
+        }
+
+        if (looksLikePrintableAsciiWord(entryBase))
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    void unlinkGuestListNode(uint8_t *rdram, uint32_t nodeAddr)
+    {
+        if (!rdram || nodeAddr == 0u || nodeAddr >= kPs2RdramSize)
+        {
+            return;
+        }
+
+        const uint32_t next = readGuestU32Raw(rdram, nodeAddr + 0x0u);
+        const uint32_t prev = readGuestU32Raw(rdram, nodeAddr + 0x4u);
+        if (next == 0u || prev == 0u || next >= kPs2RdramSize || prev >= kPs2RdramSize)
+        {
+            return;
+        }
+
+        writeGuestU32Raw(rdram, prev + 0x0u, next);
+        writeGuestU32Raw(rdram, next + 0x4u, prev);
+        writeGuestU32Raw(rdram, nodeAddr + 0x0u, nodeAddr);
+        writeGuestU32Raw(rdram, nodeAddr + 0x4u, nodeAddr);
+    }
+
+    void nfsHp2AlphaReconnectTextureTable(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        if (!rdram || !ctx || !runtime)
+        {
+            if (runtime)
+            {
+                runtime->requestStop();
+            }
+            return;
+        }
+
+        const uint32_t entryPc = ctx->pc;
+        const uint32_t modelAddr = getRegU32(ctx, 4);
+        const uint32_t gp = getRegU32(ctx, 28);
+        if (modelAddr == 0u || modelAddr >= kPs2RdramSize)
+        {
+            ctx->pc = 0x109248u;
+            ApplyReplacementTextureTable__6eModel_0x109248(rdram, ctx, runtime);
+            if (ctx->pc == 0x109248u)
+            {
+                ctx->pc = entryPc;
+            }
+            return;
+        }
+
+        uint32_t entryBase = readGuestU32Raw(rdram, modelAddr + 0x10u);
+        uint32_t entryCount = static_cast<uint8_t>(rdram[(modelAddr + 0x14u) & PS2_RAM_MASK]);
+        const uint32_t replacementOffset = static_cast<uint8_t>(rdram[(modelAddr + 0x15u) & PS2_RAM_MASK]);
+        const uint32_t solidAddr = readGuestU32Raw(rdram, modelAddr + 0x0Cu);
+
+        static uint32_t s_reconnectLogCount = 0u;
+        if (s_reconnectLogCount < 12u)
+        {
+            std::cerr << "[nfs-hp2-alpha] ReconnectTextureTable:enter"
+                      << " model=0x" << std::hex << modelAddr
+                      << " entryBase=0x" << entryBase
+                      << " count=0x" << entryCount
+                      << " replOff=0x" << replacementOffset
+                      << " solid=0x" << solidAddr
+                      << " ra=0x" << getRegU32(ctx, 31)
+                      << std::dec << std::endl;
+            ++s_reconnectLogCount;
+        }
+
+        if (entryBase >= kPs2RdramSize)
+        {
+            entryBase = 0u;
+            entryCount = 0u;
+            writeGuestU32Raw(rdram, modelAddr + 0x10u, 0u);
+            rdram[(modelAddr + 0x14u) & PS2_RAM_MASK] = 0u;
+        }
+        else
+        {
+            const uint64_t entryEnd = static_cast<uint64_t>(entryBase) + (static_cast<uint64_t>(entryCount) * 0x1Cu);
+            if (entryBase == 0u || entryEnd > kPs2RdramSize || entryCount > 0x200u)
+            {
+                static uint32_t s_badRangeLogCount = 0u;
+                if (s_badRangeLogCount < 8u)
+                {
+                    std::cerr << "[nfs-hp2-alpha] ReconnectTextureTable:clamped"
+                              << " model=0x" << std::hex << modelAddr
+                              << " entryBase=0x" << entryBase
+                              << " count=0x" << entryCount
+                              << " end=0x" << static_cast<uint32_t>(entryEnd & 0xFFFFFFFFu)
+                              << std::dec << std::endl;
+                    ++s_badRangeLogCount;
+                }
+                entryCount = 0u;
+                writeGuestU32Raw(rdram, modelAddr + 0x10u, 0u);
+                rdram[(modelAddr + 0x14u) & PS2_RAM_MASK] = 0u;
+            }
+        }
+
+        for (uint32_t i = 0u; i < entryCount; ++i)
+        {
+            const uint32_t entryAddr = entryBase + (i * 0x1Cu);
+            const uint32_t wantedTextureId = readGuestU32Raw(rdram, entryAddr + 0x4u);
+            uint32_t resolvedTextureInfo = 0u;
+
+            if (!isLikelyPoisonTextureId(wantedTextureId))
+            {
+                if (!tryResolveTextureInfoFast(rdram, gp, wantedTextureId, resolvedTextureInfo))
+                {
+                    resolvedTextureInfo = 0u;
+                }
+            }
+            else
+            {
+                static uint32_t s_poisonLogCount = 0u;
+                if (s_poisonLogCount < 24u)
+                {
+                    std::cerr << "[nfs-hp2-alpha] ReconnectTextureTable:poison"
+                              << " model=0x" << std::hex << modelAddr
+                              << " entry=0x" << entryAddr
+                              << " idx=0x" << i
+                              << " texture=0x" << wantedTextureId
+                              << std::dec << std::endl;
+                    ++s_poisonLogCount;
+                }
+            }
+
+            writeGuestU32Raw(rdram, entryAddr + 0x8u, resolvedTextureInfo);
+            const uint32_t replacementFlagAddr = (entryAddr + 0x0Cu + replacementOffset) & PS2_RAM_MASK;
+            rdram[replacementFlagAddr] = 0xFFu;
+
+            if (solidAddr != 0u && solidAddr < kPs2RdramSize)
+            {
+                const int16_t solidCount = static_cast<int16_t>(readGuestU32Raw(rdram, solidAddr + 0xACu) & 0xFFFFu);
+                const uint32_t solidTable = readGuestU32Raw(rdram, solidAddr + 0xB8u);
+                if (solidCount > 0 && solidTable < kPs2RdramSize)
+                {
+                    const uint32_t solidId = readGuestU32Raw(rdram, entryAddr + 0x0u);
+                    for (int32_t solidIndex = 0; solidIndex < solidCount; ++solidIndex)
+                    {
+                        const uint32_t solidEntry = solidTable + (static_cast<uint32_t>(solidIndex) * 8u);
+                        if (solidEntry + 8u > kPs2RdramSize)
+                        {
+                            break;
+                        }
+
+                        if (readGuestU32Raw(rdram, solidEntry + 0x0u) == solidId)
+                        {
+                            rdram[replacementFlagAddr] = static_cast<uint8_t>(solidIndex);
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        ctx->pc = 0x109248u;
+        ApplyReplacementTextureTable__6eModel_0x109248(rdram, ctx, runtime);
+        if (ctx->pc == 0x109248u)
+        {
+            ctx->pc = entryPc;
+        }
+    }
+
+    void nfsHp2AlphaReconnectAllModels(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        if (!rdram || !ctx || !runtime)
+        {
+            if (runtime)
+            {
+                runtime->requestStop();
+            }
+            return;
+        }
+
+        const uint32_t entryPc = ctx->pc;
+        const uint32_t gp = getRegU32(ctx, 28);
+        const uint32_t sentinel = gp - 0x6B00u;
+        uint32_t current = readGuestU32Raw(rdram, sentinel + 0x0u);
+
+        static uint32_t s_allModelsLogCount = 0u;
+        if (s_allModelsLogCount < 6u)
+        {
+            std::cerr << "[nfs-hp2-alpha] ReconnectAllModels:enter"
+                      << " sentinel=0x" << std::hex << sentinel
+                      << " head=0x" << current
+                      << " tail=0x" << readGuestU32Raw(rdram, sentinel + 0x4u)
+                      << std::dec << std::endl;
+            ++s_allModelsLogCount;
+        }
+
+        uint32_t walked = 0u;
+        while (current != 0u && current != sentinel && walked < 0x400u)
+        {
+            const uint32_t next = readGuestU32Raw(rdram, current + 0x0u);
+            const uint32_t solidAddr = readGuestU32Raw(rdram, current + 0x0Cu);
+            const uint32_t entryBase = readGuestU32Raw(rdram, current + 0x10u);
+            const uint32_t entryCount = static_cast<uint8_t>(rdram[(current + 0x14u) & PS2_RAM_MASK]);
+
+            if (!isLikelyModelReconnectTable(entryBase, entryCount))
+            {
+                static uint32_t s_dropLogCount = 0u;
+                if (s_dropLogCount < 16u)
+                {
+                    std::cerr << "[nfs-hp2-alpha] ReconnectAllModels:drop-node"
+                              << " node=0x" << std::hex << current
+                              << " next=0x" << next
+                              << " solid=0x" << solidAddr
+                              << " entryBase=0x" << entryBase
+                              << " count=0x" << entryCount
+                              << std::dec << std::endl;
+                    ++s_dropLogCount;
+                }
+                unlinkGuestListNode(rdram, current);
+                current = next;
+                ++walked;
+                continue;
+            }
+
+            SET_GPR_U32(ctx, 4, current);
+            const uint32_t solidEntryPc = 0x109018u;
+            ctx->pc = solidEntryPc;
+            ReconnectSolid__6eModel_0x109018(rdram, ctx, runtime);
+            if (ctx->pc != 0x1094F8u && ctx->pc != solidEntryPc)
+            {
+                return;
+            }
+
+            SET_GPR_U32(ctx, 4, current);
+            ctx->pc = 0x109050u;
+            nfsHp2AlphaReconnectTextureTable(rdram, ctx, runtime);
+            if (ctx->pc != 0x109500u && ctx->pc != 0x109050u)
+            {
+                return;
+            }
+
+            const uint32_t refreshedSolidAddr = readGuestU32Raw(rdram, current + 0x0Cu);
+            if (refreshedSolidAddr != 0u && refreshedSolidAddr < kPs2RdramSize)
+            {
+                SET_GPR_U32(ctx, 4, refreshedSolidAddr);
+                const uint32_t fixStripEntryPc = 0x108BA0u;
+                ctx->pc = fixStripEntryPc;
+                FixStripSTs__6eSolid_0x108ba0(rdram, ctx, runtime);
+                if (ctx->pc != 0x109514u && ctx->pc != fixStripEntryPc)
+                {
+                    return;
+                }
+            }
+
+            current = next;
+            ++walked;
+        }
+
+        ctx->pc = entryPc;
+    }
+
+    void nfsHp2AlphaFindAnimationSolid(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        if (!rdram || !ctx || !runtime)
+        {
+            if (runtime)
+            {
+                runtime->requestStop();
+            }
+            return;
+        }
+
+        const uint32_t entryPc = ctx->pc;
+        const uint32_t wantedSolidId = getRegU32(ctx, 4);
+        const uint32_t gp = getRegU32(ctx, 28);
+        const uint32_t sentinel = gp - 0x58B0u;
+        uint32_t head = readGuestU32Raw(rdram, sentinel + 0x0u);
+        uint32_t tail = readGuestU32Raw(rdram, sentinel + 0x4u);
+
+        if (head == 0u || tail == 0u)
+        {
+            initializeGuestListSentinel(rdram, sentinel);
+            head = sentinel;
+            tail = sentinel;
+            static uint32_t s_animSentinelRepairCount = 0u;
+            if (s_animSentinelRepairCount < 4u)
+            {
+                std::cerr << "[nfs-hp2-alpha] repaired animation solid sentinel"
+                          << " sentinel=0x" << std::hex << sentinel
+                          << " oldHead=0x" << head
+                          << " oldTail=0x" << tail
+                          << std::dec << std::endl;
+                ++s_animSentinelRepairCount;
+            }
+        }
+
+        uint32_t current = readGuestU32Raw(rdram, sentinel + 0x0u);
+        uint32_t result = 0u;
+        for (uint32_t walked = 0u; current != 0u && current != sentinel && walked < 0x400u; ++walked)
+        {
+            if (current >= kPs2RdramSize)
+            {
+                break;
+            }
+
+            const uint32_t nodeSolidId = readGuestU32Raw(rdram, current + 0x18u);
+            if (nodeSolidId == wantedSolidId)
+            {
+                result = current;
+                break;
+            }
+
+            const uint32_t next = readGuestU32Raw(rdram, current + 0x0u);
+            if (next == current || next == 0u || next >= kPs2RdramSize)
+            {
+                static uint32_t s_animBadNodeCount = 0u;
+                if (s_animBadNodeCount < 12u)
+                {
+                    std::cerr << "[nfs-hp2-alpha] animation solid list break"
+                              << " wanted=0x" << std::hex << wantedSolidId
+                              << " node=0x" << current
+                              << " next=0x" << next
+                              << " solidId=0x" << nodeSolidId
+                              << std::dec << std::endl;
+                    ++s_animBadNodeCount;
+                }
+                break;
+            }
+            current = next;
+        }
+
+        setReturnU32(ctx, result);
+        ctx->pc = entryPc;
+    }
+
+    void nfsHp2AlphaReconnectAllAnimations(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        if (!rdram || !ctx || !runtime)
+        {
+            if (runtime)
+            {
+                runtime->requestStop();
+            }
+            return;
+        }
+
+        const uint32_t entryPc = ctx->pc;
+        const uint32_t gp = getRegU32(ctx, 28);
+        const uint32_t sentinel = gp - 0x58B8u;
+        uint32_t head = readGuestU32Raw(rdram, sentinel + 0x0u);
+        uint32_t tail = readGuestU32Raw(rdram, sentinel + 0x4u);
+
+        if (head == 0u || tail == 0u)
+        {
+            const uint32_t oldHead = head;
+            const uint32_t oldTail = tail;
+            initializeGuestListSentinel(rdram, sentinel);
+            static uint32_t s_animListRepairCount = 0u;
+            if (s_animListRepairCount < 4u)
+            {
+                std::cerr << "[nfs-hp2-alpha] repaired animation list sentinel"
+                          << " sentinel=0x" << std::hex << sentinel
+                          << " oldHead=0x" << oldHead
+                          << " oldTail=0x" << oldTail
+                          << std::dec << std::endl;
+                ++s_animListRepairCount;
+            }
+        }
+
+        uint32_t current = readGuestU32Raw(rdram, sentinel + 0x0u);
+        for (uint32_t walked = 0u; current != 0u && current != sentinel && walked < 0x400u; ++walked)
+        {
+            if (current >= kPs2RdramSize)
+            {
+                break;
+            }
+
+            const uint32_t next = readGuestU32Raw(rdram, current + 0x0u);
+            SET_GPR_U32(ctx, 4, current);
+            const uint32_t reconnectEntryPc = 0x17BFD0u;
+            ctx->pc = reconnectEntryPc;
+            ReconnectSolid__10eAnimation_0x17bfd0(rdram, ctx, runtime);
+            if (ctx->pc != 0x17C548u && ctx->pc != reconnectEntryPc)
+            {
+                return;
+            }
+
+            if (next == current || next == 0u || next >= kPs2RdramSize)
+            {
+                static uint32_t s_animNodeBreakCount = 0u;
+                if (s_animNodeBreakCount < 12u)
+                {
+                    std::cerr << "[nfs-hp2-alpha] animation list break"
+                              << " node=0x" << std::hex << current
+                              << " next=0x" << next
+                              << " solidA=0x" << readGuestU32Raw(rdram, current + 0x20u)
+                              << " solidB=0x" << readGuestU32Raw(rdram, current + 0x24u)
+                              << std::dec << std::endl;
+                    ++s_animNodeBreakCount;
+                }
+                break;
+            }
+
+            current = next;
+        }
+
+        ctx->pc = entryPc;
+    }
+
+    void nfsHp2AlphaAfxUpdateTextures(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        if (!rdram || !ctx || !runtime)
+        {
+            if (runtime)
+            {
+                runtime->requestStop();
+            }
+            return;
+        }
+
+        const uint32_t entryPc = ctx->pc;
+        const uint32_t gp = getRegU32(ctx, 28);
+        const uint32_t sentinel = gp - 0x65A0u;
+        uint32_t head = readGuestU32Raw(rdram, sentinel + 0x0u);
+        uint32_t tail = readGuestU32Raw(rdram, sentinel + 0x4u);
+        if (head == 0u || tail == 0u)
+        {
+            const uint32_t oldHead = head;
+            const uint32_t oldTail = tail;
+            initializeGuestListSentinel(rdram, sentinel);
+            static uint32_t s_afxListRepairCount = 0u;
+            if (s_afxListRepairCount < 4u)
+            {
+                std::cerr << "[nfs-hp2-alpha] repaired afx texture list sentinel"
+                          << " sentinel=0x" << std::hex << sentinel
+                          << " oldHead=0x" << oldHead
+                          << " oldTail=0x" << oldTail
+                          << std::dec << std::endl;
+                ++s_afxListRepairCount;
+            }
+        }
+
+        uint32_t current = readGuestU32Raw(rdram, sentinel + 0x0u);
+        for (uint32_t walked = 0u; current != 0u && current != sentinel && walked < 0x400u; ++walked)
+        {
+            if (current >= kPs2RdramSize)
+            {
+                break;
+            }
+
+            const uint32_t next = readGuestU32Raw(rdram, current + 0x0u);
+            const uint32_t wantedTextureId = readGuestU32Raw(rdram, current + 0x0Cu);
+            const uint32_t cachedTextureInfo = readGuestU32Raw(rdram, current + 0x14u);
+            bool needsRefresh = (cachedTextureInfo == 0u);
+            if (!needsRefresh && cachedTextureInfo < kPs2RdramSize)
+            {
+                needsRefresh = (readGuestU32Raw(rdram, cachedTextureInfo + 0x20u) != wantedTextureId);
+            }
+
+            if (needsRefresh)
+            {
+                uint32_t resolved = 0u;
+                if (!isLikelyPoisonTextureId(wantedTextureId))
+                {
+                    if (!tryResolveTextureInfoFast(rdram, gp, wantedTextureId, resolved))
+                    {
+                        resolved = 0u;
+                    }
+                }
+                writeGuestU32Raw(rdram, current + 0x14u, resolved);
+
+                static uint32_t s_afxUpdateLogCount = 0u;
+                if (s_afxUpdateLogCount < 16u)
+                {
+                    std::cerr << "[nfs-hp2-alpha] afxUpdateTextures"
+                              << " node=0x" << std::hex << current
+                              << " wanted=0x" << wantedTextureId
+                              << " cached=0x" << cachedTextureInfo
+                              << " resolved=0x" << resolved
+                              << std::dec << std::endl;
+                    ++s_afxUpdateLogCount;
+                }
+            }
+
+            if (next == current || next == 0u || next >= kPs2RdramSize)
+            {
+                static uint32_t s_afxBreakLogCount = 0u;
+                if (s_afxBreakLogCount < 12u)
+                {
+                    std::cerr << "[nfs-hp2-alpha] afx texture list break"
+                              << " node=0x" << std::hex << current
+                              << " next=0x" << next
+                              << " wanted=0x" << wantedTextureId
+                              << std::dec << std::endl;
+                    ++s_afxBreakLogCount;
+                }
+                break;
+            }
+
+            current = next;
+        }
+
+        ctx->pc = entryPc;
+    }
+
+    void nfsHp2AlphaLoadCommonRegion(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        if (!rdram || !ctx || !runtime)
+        {
+            if (runtime)
+            {
+                runtime->requestStop();
+            }
+            return;
+        }
+
+        const uint32_t entryPc = ctx->pc;
+        const uint32_t soundAddr = getRegU32(ctx, 4);
+        if (soundAddr == 0u || soundAddr >= kPs2RdramSize)
+        {
+            ctx->pc = entryPc;
+            return;
+        }
+
+        const uint32_t commonState = readGuestU32Raw(rdram, soundAddr + 0xA0Cu);
+        const uint32_t regionBase = readGuestU32Raw(rdram, soundAddr + 0x200u);
+        const uint32_t regionSize = readGuestU32Raw(rdram, soundAddr + 0xA10u);
+        const uint32_t regionPtr = readGuestU32Raw(rdram, soundAddr + 0xC28u);
+        const uint32_t gp = getRegU32(ctx, 28);
+
+        auto disableCommonRegion = [&](const char *reason)
+        {
+            writeGuestU32Raw(rdram, soundAddr + 0xA0Cu, 0u);
+            writeGuestU32Raw(rdram, soundAddr + 0xC28u, 0u);
+            if (gp != 0u && gp < kPs2RdramSize && gp >= 0x57A0u)
+            {
+                writeGuestU32Raw(rdram, gp - 0x57A0u, 1u);
+            }
+            static uint32_t s_soundDisableLogCount = 0u;
+            if (s_soundDisableLogCount < 12u)
+            {
+                std::cerr << "[nfs-hp2-alpha] disabled sound common region"
+                          << " sound=0x" << std::hex << soundAddr
+                          << " gp=0x" << gp
+                          << " state=0x" << commonState
+                          << " base=0x" << regionBase
+                          << " size=0x" << regionSize
+                          << " region=0x" << regionPtr
+                          << " initReady=1"
+                          << " reason=" << reason
+                          << std::dec << std::endl;
+                ++s_soundDisableLogCount;
+            }
+        };
+
+        if (commonState != 1u)
+        {
+            ctx->pc = entryPc;
+            return;
+        }
+
+        const uint64_t regionEnd = static_cast<uint64_t>(regionBase) + static_cast<uint64_t>(regionSize);
+        if (regionBase == 0u || regionBase >= kPs2RdramSize || regionSize == 0u || regionEnd > kPs2RdramSize)
+        {
+            disableCommonRegion("invalid-range");
+            ctx->pc = entryPc;
+            return;
+        }
+
+        uint32_t cursor = regionBase;
+        bool foundCommonRegion = false;
+        for (uint32_t walked = 0u; cursor < regionEnd && walked < 0x800u; ++walked)
+        {
+            const uint32_t tag = readGuestU32Raw(rdram, cursor + 0x0u);
+            if (tag == 0x80014101u)
+            {
+                foundCommonRegion = true;
+                break;
+            }
+
+            const uint32_t stepSize = readGuestU32Raw(rdram, cursor + 0x4u);
+            if (stepSize == 0u || stepSize > 0x100000u)
+            {
+                disableCommonRegion("invalid-step");
+                ctx->pc = entryPc;
+                return;
+            }
+
+            const uint64_t nextCursor = static_cast<uint64_t>(cursor) + static_cast<uint64_t>(stepSize) + 8u;
+            if (nextCursor <= cursor || nextCursor > regionEnd)
+            {
+                disableCommonRegion("step-out-of-range");
+                ctx->pc = entryPc;
+                return;
+            }
+
+            cursor = static_cast<uint32_t>(nextCursor);
+        }
+
+        if (!foundCommonRegion)
+        {
+            disableCommonRegion("scan-exhausted");
+            ctx->pc = entryPc;
+            return;
+        }
+
+        LoadCommonRegion__6bSound_0x20cf50(rdram, ctx, runtime);
+        if (ctx->pc == entryPc)
+        {
+            ctx->pc = entryPc;
+        }
+    }
+
+    void nfsHp2AlphaLoadTextureTableFromFile(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        if (!rdram || !ctx || !runtime)
+        {
+            if (runtime)
+            {
+                runtime->requestStop();
+            }
+            return;
+        }
+
+        const uint32_t entryPc = ctx->pc;
+        const uint32_t packAddr = getRegU32(ctx, 4);
+        const uint32_t sourcePathAddr = getRegU32(ctx, 5);
+        const uint32_t preTable = (packAddr != 0u) ? readGuestU32Raw(rdram, packAddr + 0x60u) : 0u;
+        const uint32_t preCount = (packAddr != 0u) ? readGuestU32Raw(rdram, packAddr + 0x64u) : 0u;
+        const std::string sourcePath = readGuestCStringRaw(rdram, sourcePathAddr, 0x200u);
+
+        static uint32_t s_enterLogCount = 0u;
+        if (s_enterLogCount < 16u)
+        {
+            std::cerr << "[nfs-hp2-alpha] LoadTextureTableFromFile:enter"
+                      << " pack=0x" << std::hex << packAddr
+                      << " argPath=0x" << sourcePathAddr
+                      << " preTable=0x" << preTable
+                      << " preCount=0x" << preCount
+                      << " path=\"" << sourcePath << "\""
+                      << " ra=0x" << getRegU32(ctx, 31)
+                      << std::dec << std::endl;
+            ++s_enterLogCount;
+        }
+
+        auto tryHostFastPath = [&]() -> bool
+        {
+            if (packAddr == 0u || sourcePath.empty())
+            {
+                return false;
+            }
+
+            const auto unpackedRoot = detectNfsHp2UnpackedRoot(runtime->getIoPaths());
+            if (unpackedRoot.empty())
+            {
+                return false;
+            }
+
+            std::filesystem::path relativePath(sourcePath);
+            std::filesystem::path hostPath = (unpackedRoot / relativePath).lexically_normal();
+            std::error_code ec;
+            if (!std::filesystem::exists(hostPath, ec) || ec || !std::filesystem::is_regular_file(hostPath, ec))
+            {
+                return false;
+            }
+
+            const uint64_t fileSize = std::filesystem::file_size(hostPath, ec);
+            if (ec || fileSize < 0x2Cu)
+            {
+                return false;
+            }
+
+            const size_t prefixSize = static_cast<size_t>(std::min<uint64_t>(fileSize, 0x20000u));
+            std::vector<uint8_t> bytes(prefixSize);
+            std::ifstream stream(hostPath, std::ios::binary);
+            if (!stream)
+            {
+                return false;
+            }
+
+            stream.read(reinterpret_cast<char *>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+            if (stream.gcount() != static_cast<std::streamsize>(bytes.size()))
+            {
+                return false;
+            }
+
+            auto readHostU32 = [&](size_t offset) -> uint32_t
+            {
+                if ((offset + 4u) > bytes.size())
+                {
+                    return 0u;
+                }
+
+                return static_cast<uint32_t>(bytes[offset + 0u]) |
+                       (static_cast<uint32_t>(bytes[offset + 1u]) << 8) |
+                       (static_cast<uint32_t>(bytes[offset + 2u]) << 16) |
+                       (static_cast<uint32_t>(bytes[offset + 3u]) << 24);
+            };
+
+            const uint32_t firstBlockOffset = readHostU32(0x0Cu);
+            const size_t sectionBase = 0x08u + static_cast<size_t>(firstBlockOffset);
+            const size_t nestedBase = sectionBase + 0x08u;
+            if ((nestedBase + 0x08u) > bytes.size())
+            {
+                return false;
+            }
+
+            const uint32_t textureTableBytes = readHostU32(nestedBase + 0x04u);
+            if (textureTableBytes == 0u || (textureTableBytes % kTextureInfoStride) != 0u)
+            {
+                return false;
+            }
+
+            const size_t tableSrcOffset = sectionBase + 0x10u;
+            const size_t nestedEnd = nestedBase + static_cast<size_t>(textureTableBytes);
+            const size_t nestedEndWithHeader = nestedEnd + 0x08u;
+            if (tableSrcOffset >= bytes.size() || nestedEndWithHeader > bytes.size())
+            {
+                return false;
+            }
+
+            const uint32_t textureEntryCount = textureTableBytes / kTextureInfoStride;
+            if (textureEntryCount == 0u || textureEntryCount > kMaxReasonableTextureEntryCount)
+            {
+                return false;
+            }
+
+            auto callGuestMalloc = [&](uint32_t sizeBytes) -> uint32_t
+            {
+                if (!runtime->hasFunction(0x1FBFE0u))
+                {
+                    return 0u;
+                }
+
+                R5900Context mallocCtx = *ctx;
+                SET_GPR_U32(&mallocCtx, 4, sizeBytes);
+                SET_GPR_U32(&mallocCtx, 5, 0x10u);
+                mallocCtx.pc = 0x1FBFE0u;
+                auto fn = runtime->lookupFunction(0x1FBFE0u);
+                fn(rdram, &mallocCtx, runtime);
+                return getRegU32(&mallocCtx, 2);
+            };
+
+            const uint32_t guestTableAddr = callGuestMalloc(textureTableBytes);
+            if (guestTableAddr == 0u)
+            {
+                return false;
+            }
+
+            std::memcpy(rdram + (guestTableAddr & PS2_RAM_MASK),
+                        bytes.data() + tableSrcOffset,
+                        textureTableBytes);
+
+            std::memset(rdram + ((packAddr + 0x28u) & PS2_RAM_MASK), 0, 0x34u);
+            const size_t boundedPathLen = std::min<size_t>(sourcePath.size(), 0x33u);
+            std::memcpy(rdram + ((packAddr + 0x28u) & PS2_RAM_MASK), sourcePath.data(), boundedPathLen);
+
+            const uint32_t dataOffsetAligned =
+                static_cast<uint32_t>((nestedEnd + 0x8Fu) & ~static_cast<size_t>(0x7Fu));
+            writeGuestU32Raw(rdram, packAddr + 0x6Cu, dataOffsetAligned);
+
+            uint32_t guestDataAddr = 0u;
+            size_t payloadBytes = 0u;
+            if (static_cast<uint64_t>(dataOffsetAligned) < fileSize)
+            {
+                payloadBytes = static_cast<size_t>(fileSize - static_cast<uint64_t>(dataOffsetAligned));
+                if (payloadBytes > 0u)
+                {
+                    guestDataAddr = callGuestMalloc(static_cast<uint32_t>(payloadBytes));
+                    if (guestDataAddr != 0u)
+                    {
+                        std::vector<uint8_t> payload(payloadBytes);
+                        stream.clear();
+                        stream.seekg(static_cast<std::streamoff>(dataOffsetAligned), std::ios::beg);
+                        stream.read(reinterpret_cast<char *>(payload.data()), static_cast<std::streamsize>(payload.size()));
+                        if (stream.gcount() != static_cast<std::streamsize>(payload.size()))
+                        {
+                            guestDataAddr = 0u;
+                            payloadBytes = 0u;
+                        }
+                        else
+                        {
+                            std::memcpy(rdram + (guestDataAddr & PS2_RAM_MASK), payload.data(), payloadBytes);
+                            texturePackPayloadWindows()[packAddr] = {
+                                guestDataAddr,
+                                static_cast<uint32_t>(payloadBytes)};
+
+                            for (uint32_t entryIndex = 0u; entryIndex < textureEntryCount; ++entryIndex)
+                            {
+                                const uint32_t entryAddr = guestTableAddr + (entryIndex * kTextureInfoStride);
+                                const uint32_t offset30 = readGuestU32Raw(rdram, entryAddr + 0x30u);
+                                const uint32_t offset34 = readGuestU32Raw(rdram, entryAddr + 0x34u);
+                                if (offset30 < payloadBytes)
+                                {
+                                    writeGuestU32Raw(rdram, entryAddr + 0x8Cu, guestDataAddr + offset30);
+                                }
+                                if (offset34 < payloadBytes)
+                                {
+                                    writeGuestU32Raw(rdram, entryAddr + 0x90u, guestDataAddr + offset34);
+                                }
+                            }
+
+                            R5900Context assignCtx = *ctx;
+                            SET_GPR_U32(&assignCtx, 4, packAddr);
+                            SET_GPR_U32(&assignCtx, 5, guestDataAddr);
+                            SET_GPR_U32(&assignCtx, 6, 0u);
+                            SET_GPR_U32(&assignCtx, 7, static_cast<uint32_t>(payloadBytes));
+                            assignCtx.pc = 0x1809F0u;
+                            AssignTextureData__11TexturePackPcii_0x1809f0(rdram, &assignCtx, runtime);
+                        }
+                    }
+                }
+            }
+
+            R5900Context attachCtx = *ctx;
+            SET_GPR_U32(&attachCtx, 4, packAddr);
+            SET_GPR_U32(&attachCtx, 5, guestTableAddr);
+            SET_GPR_U32(&attachCtx, 6, textureEntryCount);
+            attachCtx.pc = 0x1808E0u;
+            AttachTextureTable__11TexturePackP11TextureInfoi_0x1808e0(rdram, &attachCtx, runtime);
+
+            writeGuestU32Raw(rdram, packAddr + 0x68u, 1u);
+
+            static uint32_t s_fastPathLogCount = 0u;
+            if (s_fastPathLogCount < 12u)
+            {
+                std::cerr << "[nfs-hp2-alpha] LoadTextureTableFromFile:host-fast-path"
+                          << " pack=0x" << std::hex << packAddr
+                          << " host=\"" << hostPath.string() << "\""
+                          << " guestTable=0x" << guestTableAddr
+                          << " guestData=0x" << guestDataAddr
+                          << " count=0x" << textureEntryCount
+                          << " dataOffset=0x" << dataOffsetAligned
+                          << " payloadBytes=0x" << static_cast<uint32_t>(payloadBytes)
+                          << " postTable=0x" << readGuestU32Raw(rdram, packAddr + 0x60u)
+                          << " postCount=0x" << readGuestU32Raw(rdram, packAddr + 0x64u)
+                          << std::dec << std::endl;
+                ++s_fastPathLogCount;
+            }
+
+            return readGuestU32Raw(rdram, packAddr + 0x60u) != 0u &&
+                   readGuestU32Raw(rdram, packAddr + 0x64u) != 0u;
+        };
+
+        if (tryHostFastPath())
+        {
+            ctx->pc = entryPc;
+            return;
+        }
+
+        LoadTextureTableFromFile__11TexturePackPCc_0x180c18(rdram, ctx, runtime);
+
+        const uint32_t postTable = (packAddr != 0u) ? readGuestU32Raw(rdram, packAddr + 0x60u) : 0u;
+        const uint32_t postCount = (packAddr != 0u) ? readGuestU32Raw(rdram, packAddr + 0x64u) : 0u;
+        const uint32_t packPathAddr = (packAddr != 0u) ? (packAddr + 0x28u) : 0u;
+        const std::string packPath = readGuestCStringRaw(rdram, packPathAddr, 0x200u);
+
+        static uint32_t s_exitLogCount = 0u;
+        if (s_exitLogCount < 20u)
+        {
+            std::cerr << "[nfs-hp2-alpha] LoadTextureTableFromFile:return"
+                      << " pack=0x" << std::hex << packAddr
+                      << " postTable=0x" << postTable
+                      << " postCount=0x" << postCount
+                      << " packPath=\"" << packPath << "\""
+                      << " pc=0x" << ctx->pc
+                      << std::dec << std::endl;
+            ++s_exitLogCount;
+        }
+
+        if (ctx->pc == entryPc)
+        {
+            ctx->pc = entryPc;
+        }
+    }
+
+    void nfsHp2AlphaOpenPlatformFile(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        const uint32_t entryPc = ctx->pc;
+        const uint32_t pathAddr = getRegU32(ctx, 4);
+        const uint32_t returnAddr = getRegU32(ctx, 31);
+        std::string sourcePath = readGuestCStringRaw(rdram, pathAddr, 0x100u);
+        if (ps2IsScratchpadAddress(pathAddr))
+        {
+            mirrorScratchpadCStringToMaskedAlias(rdram, pathAddr, 0x100u);
+            static uint32_t s_scratchpadPathLogCount = 0u;
+            if (s_scratchpadPathLogCount < 16u)
+            {
+                std::cerr << "[nfs-hp2-alpha] OpenPlatformFile:mirrored-scratchpad-path"
+                          << " guest=0x" << std::hex << pathAddr
+                          << " alias=0x" << (pathAddr & PS2_RAM_MASK)
+                          << " ra=0x" << returnAddr
+                          << " path=\"" << sourcePath << "\""
+                          << std::dec << std::endl;
+                ++s_scratchpadPathLogCount;
+            }
+
+            std::filesystem::path hostPath;
+            if (!sourcePath.empty() &&
+                resolveNfsHp2UnpackedFile(runtime->getIoPaths(), sourcePath, hostPath))
+            {
+                uint32_t pseudoLbn = 0u;
+                uint32_t sizeBytes = 0u;
+                if (ps2_stubs::registerCdHostFileAlias(sourcePath, hostPath, &pseudoLbn, &sizeBytes))
+                {
+                    const uint32_t gp = getRegU32(ctx, 28);
+                    const uint32_t slotPoolAddr = readGuestU32Raw(rdram, ADD32(gp, 4294948176));
+                    const uint32_t savedPc = ctx->pc;
+                    const uint32_t savedA0 = getRegU32(ctx, 4);
+                    const uint32_t savedA1 = getRegU32(ctx, 5);
+                    const uint32_t savedA2 = getRegU32(ctx, 6);
+                    const uint32_t savedA3 = getRegU32(ctx, 7);
+                    const uint32_t savedT0 = getRegU32(ctx, 8);
+                    const uint32_t savedT1 = getRegU32(ctx, 9);
+
+                    uint32_t fileAddr = 0u;
+                    if (runtime->hasFunction(0x1FC530u))
+                    {
+                        SET_GPR_U32(ctx, 4, slotPoolAddr);
+                        ctx->pc = 0x1FC530u;
+                        const uint32_t allocEntryPc = ctx->pc;
+                        runtime->lookupFunction(0x1FC530u)(rdram, ctx, runtime);
+                        if (ctx->pc == allocEntryPc)
+                        {
+                            ctx->pc = savedPc;
+                        }
+                        fileAddr = getRegU32(ctx, 2);
+                    }
+
+                    if (fileAddr != 0u && runtime->hasFunction(0x1F8958u))
+                    {
+                        SET_GPR_U32(ctx, 4, fileAddr);
+                        SET_GPR_U32(ctx, 5, pathAddr);
+                        SET_GPR_U32(ctx, 6, 2u);
+                        SET_GPR_U32(ctx, 7, sizeBytes);
+                        SET_GPR_U32(ctx, 8, 0x1FADC0u);
+                        SET_GPR_U32(ctx, 9, 0x1FADA0u);
+                        ctx->pc = 0x1F8958u;
+                        const uint32_t ctorEntryPc = ctx->pc;
+                        runtime->lookupFunction(0x1F8958u)(rdram, ctx, runtime);
+                        if (ctx->pc == ctorEntryPc)
+                        {
+                            ctx->pc = savedPc;
+                        }
+
+                        writeGuestU32Raw(rdram, fileAddr + 0x84u, pseudoLbn);
+                        writeGuestU32Raw(rdram, fileAddr + 0x88u, 0u);
+                        setReturnU32(ctx, fileAddr);
+                        SET_GPR_U32(ctx, 4, savedA0);
+                        SET_GPR_U32(ctx, 5, savedA1);
+                        SET_GPR_U32(ctx, 6, savedA2);
+                        SET_GPR_U32(ctx, 7, savedA3);
+                        SET_GPR_U32(ctx, 8, savedT0);
+                        SET_GPR_U32(ctx, 9, savedT1);
+                        ctx->pc = entryPc;
+
+                        std::cerr << "[nfs-hp2-alpha] OpenPlatformFile:host-fast-path"
+                                  << " guest=0x" << std::hex << pathAddr
+                                  << " host=\"" << hostPath.string() << "\""
+                                  << " file=0x" << fileAddr
+                                  << " lbn=0x" << pseudoLbn
+                                  << " size=0x" << sizeBytes
+                                  << std::dec << std::endl;
+                        return;
+                    }
+
+                    SET_GPR_U32(ctx, 4, savedA0);
+                    SET_GPR_U32(ctx, 5, savedA1);
+                    SET_GPR_U32(ctx, 6, savedA2);
+                    SET_GPR_U32(ctx, 7, savedA3);
+                    SET_GPR_U32(ctx, 8, savedT0);
+                    SET_GPR_U32(ctx, 9, savedT1);
+                    ctx->pc = savedPc;
+                }
+            }
+        }
+
+        bool shouldLog = sourcePath.empty();
+        if (!shouldLog)
+        {
+            std::string lowerPath = sourcePath;
+            std::transform(lowerPath.begin(), lowerPath.end(), lowerPath.begin(),
+                           [](unsigned char ch)
+                           {
+                               return static_cast<char>(std::tolower(ch));
+                           });
+            shouldLog = (lowerPath.find("sound") != std::string::npos) ||
+                        (lowerPath.find("movie") != std::string::npos) ||
+                        (lowerPath.find("speech") != std::string::npos);
+        }
+
+        if (shouldLog)
+        {
+            const std::array<uint8_t, 16> previewBytes = readGuestPreviewBytes(rdram, pathAddr);
+
+            std::cerr << "[nfs-hp2-alpha] OpenPlatformFile:enter"
+                      << " pathAddr=0x" << std::hex << pathAddr
+                      << " ra=0x" << returnAddr
+                      << " path=\"" << sourcePath << "\""
+                      << " preview=";
+            for (size_t i = 0; i < previewBytes.size(); ++i)
+            {
+                if (i != 0u)
+                {
+                    std::cerr << ' ';
+                }
+                std::cerr << static_cast<uint32_t>(previewBytes[i]);
+            }
+            std::cerr << std::dec << std::endl;
+        }
+
+        OpenPlatformFile__FPCc_0x1fb360(rdram, ctx, runtime);
+
+        if (shouldLog)
+        {
+            std::cerr << "[nfs-hp2-alpha] OpenPlatformFile:return"
+                      << " pathAddr=0x" << std::hex << pathAddr
+                      << " result=0x" << getRegU32(ctx, 2)
+                      << " pc=0x" << ctx->pc
+                      << std::dec << std::endl;
+        }
+
+        if (ctx->pc == entryPc)
+        {
+            ctx->pc = entryPc;
+        }
+    }
+
+    void nfsHp2AlphaBOpen(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        const uint32_t entryPc = ctx->pc;
+        const uint32_t pathAddr = getRegU32(ctx, 4);
+        const uint32_t openFlags = getRegU32(ctx, 5);
+        const uint32_t returnAddr = getRegU32(ctx, 31);
+        const uint32_t currentSp = getRegU32(ctx, 29);
+        const uint32_t wrapperCallerRa = readGuestU32Raw(rdram, currentSp + 0x30u);
+        std::string sourcePath = readGuestCStringRaw(rdram, pathAddr, 0x100u);
+        if (ps2IsScratchpadAddress(pathAddr))
+        {
+            mirrorScratchpadCStringToMaskedAlias(rdram, pathAddr, 0x100u);
+            sourcePath = readGuestCStringRaw(rdram, pathAddr & PS2_RAM_MASK, 0x100u);
+        }
+
+        static uint32_t s_enterLogCount = 0u;
+        if ((sourcePath.empty() || sourcePath == "badptr") && s_enterLogCount < 32u)
+        {
+            const std::array<uint8_t, 16> previewBytes = readGuestPreviewBytes(rdram, pathAddr);
+            std::cerr << "[nfs-hp2-alpha] bOpen:enter"
+                      << " pathAddr=0x" << std::hex << pathAddr
+                      << " ra=0x" << returnAddr
+                      << " callerRa=0x" << wrapperCallerRa
+                      << " flags=0x" << openFlags
+                      << " path=\"" << sourcePath << "\""
+                      << " sp=0x" << currentSp
+                      << " preview=";
+            for (size_t i = 0; i < previewBytes.size(); ++i)
+            {
+                if (i != 0u)
+                {
+                    std::cerr << ' ';
+                }
+                std::cerr << static_cast<uint32_t>(previewBytes[i]);
+            }
+            std::cerr << std::dec << std::endl;
+            ++s_enterLogCount;
+        }
+
+        bOpen__FPCci_0x1f94d8(rdram, ctx, runtime);
+
+        static uint32_t s_failLogCount = 0u;
+        if (getRegU32(ctx, 2) == 0u && s_failLogCount < 32u)
+        {
+            std::cerr << "[nfs-hp2-alpha] bOpen:return-null"
+                      << " pathAddr=0x" << std::hex << pathAddr
+                      << " ra=0x" << returnAddr
+                      << " callerRa=0x" << wrapperCallerRa
+                      << " flags=0x" << openFlags
+                      << " path=\"" << sourcePath << "\""
+                      << " pc=0x" << ctx->pc
+                      << std::dec << std::endl;
+            ++s_failLogCount;
+        }
+
+        if (ctx->pc == entryPc)
+        {
+            ctx->pc = entryPc;
+        }
+    }
+
+    void logNisManagerState(uint8_t *rdram,
+                            const char *phase,
+                            uint32_t managerAddr,
+                            uint32_t returnAddr,
+                            uint32_t extra0 = 0u,
+                            uint32_t extra1 = 0u,
+                            uint32_t extra2 = 0u,
+                            uint32_t extra3 = 0u)
+    {
+        std::cerr << "[nfs-hp2-alpha] " << phase
+                  << " mgr=0x" << std::hex << managerAddr
+                  << " next=0x" << readGuestU32Raw(rdram, managerAddr + 0x00u)
+                  << " prev=0x" << readGuestU32Raw(rdram, managerAddr + 0x04u)
+                  << " state0c=0x" << readGuestU32Raw(rdram, managerAddr + 0x0Cu)
+                  << " state10=0x" << readGuestU32Raw(rdram, managerAddr + 0x10u)
+                  << " res14=0x" << readGuestU32Raw(rdram, managerAddr + 0x14u)
+                  << " res18=0x" << readGuestU32Raw(rdram, managerAddr + 0x18u)
+                  << " field3c=0x" << readGuestU32Raw(rdram, managerAddr + 0x3Cu)
+                  << " idx44=0x" << readGuestU32Raw(rdram, managerAddr + 0x44u)
+                  << " car48=0x" << readGuestU32Raw(rdram, managerAddr + 0x48u)
+                  << " car4c=0x" << readGuestU32Raw(rdram, managerAddr + 0x4Cu)
+                  << " field50=0x" << readGuestU32Raw(rdram, managerAddr + 0x50u)
+                  << " state54=0x" << readGuestU32Raw(rdram, managerAddr + 0x54u)
+                  << " state58=0x" << readGuestU32Raw(rdram, managerAddr + 0x58u)
+                  << " coord5c=0x" << readGuestU32Raw(rdram, managerAddr + 0x5Cu)
+                  << " anim80=0x" << readGuestU32Raw(rdram, managerAddr + 0x80u)
+                  << " matA0=0x" << readGuestU32Raw(rdram, managerAddr + 0xA0u)
+                  << " animB0=0x" << readGuestU32Raw(rdram, managerAddr + 0xB0u)
+                  << " extra0=0x" << extra0
+                  << " extra1=0x" << extra1
+                  << " extra2=0x" << extra2
+                  << " extra3=0x" << extra3
+                  << " ra=0x" << returnAddr
+                  << std::dec << std::endl;
+    }
+
+    void nfsHp2AlphaNisManagerCtor(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        const uint32_t entryPc = ctx->pc;
+        const uint32_t managerAddr = getRegU32(ctx, 4);
+        const uint32_t kind = getRegU32(ctx, 5);
+        static uint32_t s_ctorLogCount = 0u;
+        if (managerAddr != 0u && s_ctorLogCount < 12u)
+        {
+            logNisManagerState(rdram, "NisManager::ctor:before", managerAddr, getRegU32(ctx, 31), kind);
+        }
+        ps2____10NisManager_0x185b60(rdram, ctx, runtime);
+        if (managerAddr != 0u && s_ctorLogCount < 12u)
+        {
+            logNisManagerState(rdram, "NisManager::ctor:after", managerAddr, getRegU32(ctx, 31), kind);
+            ++s_ctorLogCount;
+        }
+        if (ctx->pc == entryPc)
+        {
+            ctx->pc = entryPc;
+        }
+    }
+
+    void nfsHp2AlphaStartNisManager(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        const uint32_t entryPc = ctx->pc;
+        const uint32_t managerAddr = getRegU32(ctx, 4);
+        const uint32_t idx = getRegU32(ctx, 5);
+        const uint32_t car0 = getRegU32(ctx, 6);
+        const uint32_t car1 = getRegU32(ctx, 7);
+        const uint32_t arg8 = getRegU32(ctx, 8);
+        static uint32_t s_startLogCount = 0u;
+        if (managerAddr != 0u && s_startLogCount < 12u)
+        {
+            logNisManagerState(rdram, "NisManager::Start:before", managerAddr, getRegU32(ctx, 31), idx, car0, car1, arg8);
+        }
+        Start__10NisManageriiP3CarT3_0x185cf8(rdram, ctx, runtime);
+        if (managerAddr != 0u && s_startLogCount < 12u)
+        {
+            logNisManagerState(rdram, "NisManager::Start:after", managerAddr, getRegU32(ctx, 31), idx, car0, car1, arg8);
+            ++s_startLogCount;
+        }
+        if (ctx->pc == entryPc)
+        {
+            ctx->pc = entryPc;
+        }
+    }
+
+    void nfsHp2AlphaLoadNisManager(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        const uint32_t entryPc = ctx->pc;
+        const uint32_t managerAddr = getRegU32(ctx, 4);
+        const uint32_t idx = getRegU32(ctx, 5);
+        static uint32_t s_loadLogCount = 0u;
+        if (managerAddr != 0u && s_loadLogCount < 16u)
+        {
+            logNisManagerState(rdram, "NisManager::Load:before", managerAddr, getRegU32(ctx, 31), idx);
+        }
+        Load__10NisManageri_0x185ee0(rdram, ctx, runtime);
+        if (managerAddr != 0u && s_loadLogCount < 16u)
+        {
+            logNisManagerState(rdram, "NisManager::Load:after", managerAddr, getRegU32(ctx, 31), idx);
+            ++s_loadLogCount;
+        }
+        if (ctx->pc == entryPc)
+        {
+            ctx->pc = entryPc;
+        }
+    }
+
+    void nfsHp2AlphaStartAnimatingNisManager(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        const uint32_t entryPc = ctx->pc;
+        const uint32_t managerAddr = getRegU32(ctx, 4);
+        static uint32_t s_startAnimatingLogCount = 0u;
+        if (managerAddr != 0u && s_startAnimatingLogCount < 16u)
+        {
+            logNisManagerState(rdram, "NisManager::StartAnimating:before", managerAddr, getRegU32(ctx, 31));
+        }
+        StartAnimating__10NisManager_0x186228(rdram, ctx, runtime);
+        if (managerAddr != 0u && s_startAnimatingLogCount < 16u)
+        {
+            logNisManagerState(rdram, "NisManager::StartAnimating:after", managerAddr, getRegU32(ctx, 31));
+            ++s_startAnimatingLogCount;
+        }
+        if (ctx->pc == entryPc)
+        {
+            ctx->pc = entryPc;
+        }
+    }
+
+    void nfsHp2AlphaRenderNisManager(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        const uint32_t entryPc = ctx->pc;
+        const uint32_t managerAddr = getRegU32(ctx, 4);
+        const uint32_t viewAddr = getRegU32(ctx, 5);
+
+        static uint32_t s_renderLogCount = 0u;
+        if (managerAddr != 0u && s_renderLogCount < 24u)
+        {
+            std::cerr << "[nfs-hp2-alpha] NisManager::Render:enter"
+                      << " mgr=0x" << std::hex << managerAddr
+                      << " view=0x" << viewAddr
+                      << " anim80=0x" << readGuestU32Raw(rdram, managerAddr + 0x80u)
+                      << " matA0=0x" << readGuestU32Raw(rdram, managerAddr + 0xA0u)
+                      << " animB0=0x" << readGuestU32Raw(rdram, managerAddr + 0xB0u)
+                      << " car48=0x" << readGuestU32Raw(rdram, managerAddr + 0x48u)
+                      << " car4c=0x" << readGuestU32Raw(rdram, managerAddr + 0x4Cu)
+                      << " idx44=0x" << readGuestU32Raw(rdram, managerAddr + 0x44u)
+                      << " state54=0x" << readGuestU32Raw(rdram, managerAddr + 0x54u)
+                      << " state58=0x" << readGuestU32Raw(rdram, managerAddr + 0x58u)
+                      << " coordinator5c=0x" << readGuestU32Raw(rdram, managerAddr + 0x5Cu)
+                      << " ra=0x" << getRegU32(ctx, 31)
+                      << std::dec << std::endl;
+            ++s_renderLogCount;
+        }
+
+        Render__10NisManagerP5eView_0x1864a0(rdram, ctx, runtime);
+
+        if (ctx->pc == entryPc)
+        {
+            ctx->pc = entryPc;
+        }
+    }
+
+    void nfsHp2AlphaDrawNisObjects(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        const uint32_t entryPc = ctx->pc;
+        const uint32_t gp = getRegU32(ctx, 28);
+        const uint32_t sentinel = ADD32(gp, 4294945032u); // gp - 0x56F8
+        uint32_t head = readGuestU32Raw(rdram, sentinel + 0x0u);
+        uint32_t tail = readGuestU32Raw(rdram, sentinel + 0x4u);
+
+        auto resetNisList = [&](const char *reason, uint32_t addr) {
+            writeGuestU32Raw(rdram, sentinel + 0x0u, sentinel);
+            writeGuestU32Raw(rdram, sentinel + 0x4u, sentinel);
+
+            static uint32_t s_resetLogCount = 0u;
+            if (s_resetLogCount < 12u)
+            {
+                std::cerr << "[nfs-hp2-alpha] reset NisManager list"
+                          << " reason=" << reason
+                          << " sentinel=0x" << std::hex << sentinel
+                          << " bad=0x" << addr
+                          << " head=0x" << head
+                          << " tail=0x" << tail
+                          << std::dec << std::endl;
+                ++s_resetLogCount;
+            }
+        };
+
+        auto isBadNodeAddr = [&](uint32_t addr) {
+            if (addr == 0u || addr == sentinel)
+            {
+                return false;
+            }
+
+            if (ps2IsScratchpadAddress(addr))
+            {
+                return true;
+            }
+
+            if (addr >= kPs2RdramSize)
+            {
+                return true;
+            }
+
+            if (addr == 0xEEEEEEEEu || addr == 0x44444444u || addr == 0xAAAAAAAAu || addr == 0x3C800000u)
+            {
+                return true;
+            }
+
+            return false;
+        };
+
+        if (head == 0u || tail == 0u || isBadNodeAddr(head) || isBadNodeAddr(tail))
+        {
+            resetNisList("invalid-head-tail", (isBadNodeAddr(head) || head == 0u) ? head : tail);
+            return;
+        }
+
+        uint32_t current = head;
+        uint32_t walked = 0u;
+        while (current != sentinel && walked < 32u)
+        {
+            if (isBadNodeAddr(current))
+            {
+                resetNisList("invalid-node", current);
+                return;
+            }
+
+            const uint32_t next = readGuestU32Raw(rdram, current + 0x0u);
+            const uint32_t prev = readGuestU32Raw(rdram, current + 0x4u);
+            if (next == 0u || prev == 0u || isBadNodeAddr(next) || isBadNodeAddr(prev))
+            {
+                resetNisList("invalid-link", current);
+                return;
+            }
+
+            const uint32_t resourceA = readGuestU32Raw(rdram, current + 0x14u);
+            const uint32_t resourceB = readGuestU32Raw(rdram, current + 0x18u);
+            const uint32_t carA = readGuestU32Raw(rdram, current + 0x48u);
+            const uint32_t carB = readGuestU32Raw(rdram, current + 0x4Cu);
+            const uint32_t anim = readGuestU32Raw(rdram, current + 0x80u);
+            const uint32_t mat = readGuestU32Raw(rdram, current + 0xA0u);
+            const uint32_t animRenderable = readGuestU32Raw(rdram, current + 0xB0u);
+            const bool looksUnready = (resourceA == 0u && resourceB == 0u &&
+                                       carA == 0u && carB == 0u &&
+                                       anim == 0u && mat == 0u && animRenderable == 0u);
+            if (looksUnready)
+            {
+                static uint32_t s_dropLogCount = 0u;
+                if (s_dropLogCount < 12u)
+                {
+                    std::cerr << "[nfs-hp2-alpha] dropped unready NisManager"
+                              << " mgr=0x" << std::hex << current
+                              << " next=0x" << next
+                              << " prev=0x" << prev
+                              << std::dec << std::endl;
+                    ++s_dropLogCount;
+                }
+                unlinkGuestListNode(rdram, current);
+                current = next;
+                ++walked;
+                continue;
+            }
+
+            current = next;
+            ++walked;
+        }
+
+        DrawNisObjects__FP5eView_0x186718(rdram, ctx, runtime);
+
+        if (ctx->pc == entryPc)
+        {
+            ctx->pc = entryPc;
+        }
+    }
+
+    bool looksLikeBadGuestPathPointer(uint32_t addr)
+    {
+        if (addr == 0u || addr == 0xAAAAAAAAu || addr == 0xEEEEEEEEu || addr == 0x44444444u)
+        {
+            return true;
+        }
+
+        if (ps2IsScratchpadAddress(addr))
+        {
+            return false;
+        }
+
+        return addr >= kPs2RdramSize;
+    }
+
+    void nfsHp2AlphaBeginLoadSound(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        const uint32_t entryPc = ctx->pc;
+        const uint32_t soundAddr = getRegU32(ctx, 4);
+        const uint32_t pathA = getRegU32(ctx, 5);
+        const uint32_t pathB = getRegU32(ctx, 6);
+
+        static uint32_t s_logCount = 0u;
+        if (s_logCount < 12u)
+        {
+            std::cerr << "[nfs-hp2-alpha] BeginLoad__6bSound"
+                      << " sound=0x" << std::hex << soundAddr
+                      << " pathA=0x" << pathA
+                      << " pathB=0x" << pathB
+                      << " badA=" << (looksLikeBadGuestPathPointer(pathA) ? 1 : 0)
+                      << " badB=" << (looksLikeBadGuestPathPointer(pathB) ? 1 : 0)
+                      << " pathAText=\"" << readGuestCStringRaw(rdram, pathA, 0x80u) << "\""
+                      << " pathBText=\"" << readGuestCStringRaw(rdram, pathB, 0x80u) << "\""
+                      << std::dec << std::endl;
+            ++s_logCount;
+        }
+
+        BeginLoad__6bSoundPcT1_0x20c760(rdram, ctx, runtime);
+        if (ctx->pc == entryPc)
+        {
+            ctx->pc = entryPc;
+        }
+    }
+
+    void nfsHp2AlphaOpenBaseSpeaker(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        const uint32_t entryPc = ctx->pc;
+        const uint32_t thisAddr = getRegU32(ctx, 4);
+        const uint32_t primaryPath = getRegU32(ctx, 5);
+        const uint32_t secondaryPath = getRegU32(ctx, 6);
+
+        static uint32_t s_logCount = 0u;
+        if (s_logCount < 16u)
+        {
+            std::cerr << "[nfs-hp2-alpha] Open__12cBaseSpeaker"
+                      << " this=0x" << std::hex << thisAddr
+                      << " primary=0x" << primaryPath
+                      << " secondary=0x" << secondaryPath
+                      << " badPrimary=" << (looksLikeBadGuestPathPointer(primaryPath) ? 1 : 0)
+                      << " badSecondary=" << (looksLikeBadGuestPathPointer(secondaryPath) ? 1 : 0)
+                      << " primaryText=\"" << readGuestCStringRaw(rdram, primaryPath, 0x80u) << "\""
+                      << " secondaryText=\"" << readGuestCStringRaw(rdram, secondaryPath, 0x80u) << "\""
+                      << std::dec << std::endl;
+            ++s_logCount;
+        }
+
+        Open__12cBaseSpeakerPCcT1_0x217820(rdram, ctx, runtime);
+        if (ctx->pc == entryPc)
+        {
+            ctx->pc = entryPc;
+        }
+    }
+
+    void nfsHp2AlphaAttachTextureTable(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        if (!rdram || !ctx || !runtime)
+        {
+            if (runtime)
+            {
+                runtime->requestStop();
+            }
+            return;
+        }
+
+        const uint32_t entryPc = ctx->pc;
+        const uint32_t packAddr = getRegU32(ctx, 4);
+        const uint32_t tableAddr = getRegU32(ctx, 5);
+        const int32_t entryCount = static_cast<int32_t>(getRegU32(ctx, 6));
+
+        static uint32_t s_enterLogCount = 0u;
+        if (s_enterLogCount < 16u)
+        {
+            std::cerr << "[nfs-hp2-alpha] AttachTextureTable:enter"
+                      << " pack=0x" << std::hex << packAddr
+                      << " table=0x" << tableAddr
+                      << " count=0x" << static_cast<uint32_t>(entryCount)
+                      << " prePackTable=0x" << ((packAddr != 0u) ? readGuestU32Raw(rdram, packAddr + 0x60u) : 0u)
+                      << " prePackCount=0x" << ((packAddr != 0u) ? readGuestU32Raw(rdram, packAddr + 0x64u) : 0u)
+                      << " ra=0x" << getRegU32(ctx, 31)
+                      << std::dec << std::endl;
+            ++s_enterLogCount;
+        }
+
+        AttachTextureTable__11TexturePackP11TextureInfoi_0x1808e0(rdram, ctx, runtime);
+
+        static uint32_t s_exitLogCount = 0u;
+        if (s_exitLogCount < 20u)
+        {
+            std::cerr << "[nfs-hp2-alpha] AttachTextureTable:return"
+                      << " pack=0x" << std::hex << packAddr
+                      << " postPackTable=0x" << ((packAddr != 0u) ? readGuestU32Raw(rdram, packAddr + 0x60u) : 0u)
+                      << " postPackCount=0x" << ((packAddr != 0u) ? readGuestU32Raw(rdram, packAddr + 0x64u) : 0u)
+                      << " packBase5c=0x" << ((packAddr != 0u) ? readGuestU32Raw(rdram, packAddr + 0x5Cu) : 0u)
+                      << " pc=0x" << ctx->pc
+                      << std::dec << std::endl;
+            ++s_exitLogCount;
+        }
+
+        if (ctx->pc == entryPc)
+        {
+            ctx->pc = entryPc;
+        }
+    }
+
+    void nfsHp2AlphaTexturePackCtor(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        if (!rdram || !ctx || !runtime)
+        {
+            if (runtime)
+            {
+                runtime->requestStop();
+            }
+            return;
+        }
+
+        const uint32_t entryPc = ctx->pc;
+        const uint32_t thisAddr = getRegU32(ctx, 4);
+        const uint32_t gp = getRegU32(ctx, 28);
+        if (thisAddr == 0u || thisAddr >= kPs2RdramSize)
+        {
+            setReturnU32(ctx, thisAddr);
+            ctx->pc = entryPc;
+            return;
+        }
+
+        std::memset(rdram + (thisAddr & PS2_RAM_MASK), 0, 0x84u);
+
+        const uint32_t texturePackListSentinel = gp - 0x5808u;
+        const uint32_t loadedTextureListSentinel = thisAddr + 0x70u;
+        const uint32_t listHead = readGuestU32Raw(rdram, texturePackListSentinel + 0x0u);
+        const uint32_t listTail = readGuestU32Raw(rdram, texturePackListSentinel + 0x4u);
+        if (listHead == 0u || listTail == 0u ||
+            listHead >= kPs2RdramSize || listTail >= kPs2RdramSize)
+        {
+            initializeGuestListSentinel(rdram, texturePackListSentinel);
+        }
+
+        initializeGuestListSentinel(rdram, loadedTextureListSentinel);
+
+        writeGuestU32Raw(rdram, thisAddr + 0x60u, 0u);
+        writeGuestU32Raw(rdram, thisAddr + 0x64u, 0u);
+        writeGuestU32Raw(rdram, thisAddr + 0x68u, 0u);
+        writeGuestU32Raw(rdram, thisAddr + 0x78u, 0u);
+        writeGuestU32Raw(rdram, thisAddr + 0x7Cu, 0u);
+        writeGuestU32Raw(rdram, thisAddr + 0x80u, 0u);
+
+        insertGuestNodeAtListHead(rdram, texturePackListSentinel, thisAddr);
+
+        static uint32_t s_ctorLogCount = 0u;
+        if (s_ctorLogCount < 12u)
+        {
+            std::cerr << "[nfs-hp2-alpha] TexturePack ctor"
+                      << " this=0x" << std::hex << thisAddr
+                      << " listSentinel=0x" << texturePackListSentinel
+                      << " head=0x" << readGuestU32Raw(rdram, texturePackListSentinel + 0x0u)
+                      << " tail=0x" << readGuestU32Raw(rdram, texturePackListSentinel + 0x4u)
+                      << std::dec << std::endl;
+            ++s_ctorLogCount;
+        }
+
+        setReturnU32(ctx, thisAddr);
+        ctx->pc = entryPc;
+    }
+
+    void nfsHp2AlphaEFixUpTables(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        if (!rdram || !ctx || !runtime)
+        {
+            if (runtime)
+            {
+                runtime->requestStop();
+            }
+            return;
+        }
+
+        const uint32_t entryPc = ctx->pc;
+        const uint32_t gp = getRegU32(ctx, 28);
+        const uint32_t solidListSentinel = gp - 0x6B08u;
+        uint32_t solidListHead = readGuestU32Raw(rdram, solidListSentinel + 0x0u);
+        const uint32_t solidListTail = readGuestU32Raw(rdram, solidListSentinel + 0x4u);
+        const uint32_t oldSolidListHead = solidListHead;
+
+        static uint32_t s_fixupRepairLogCount = 0u;
+        if (solidListHead == 0u || solidListTail == 0u)
+        {
+            initializeGuestListSentinel(rdram, solidListSentinel);
+            solidListHead = solidListSentinel;
+
+            if (s_fixupRepairLogCount < 6u)
+            {
+                std::cerr << "[nfs-hp2-alpha] repaired eSolid list sentinel"
+                          << " sentinel=0x" << std::hex << solidListSentinel
+                          << " oldHead=0x" << oldSolidListHead
+                          << " oldTail=0x" << solidListTail
+                          << std::dec << std::endl;
+                ++s_fixupRepairLogCount;
+            }
+        }
+
+        static uint32_t s_fixupDiagCount = 0u;
+        if (s_fixupDiagCount < 6u)
+        {
+            std::unordered_set<uint32_t> visited;
+            uint32_t current = solidListHead;
+            uint32_t nodeCount = 0u;
+            uint32_t repeatedNode = 0u;
+            constexpr uint32_t kMaxNodesToWalk = 0x2000u;
+
+            while (current != 0u && current != solidListSentinel && nodeCount < kMaxNodesToWalk)
+            {
+                if (current >= kPs2RdramSize || !visited.insert(current).second)
+                {
+                    repeatedNode = current;
+                    break;
+                }
+
+                if (nodeCount < 6u)
+                {
+                    std::cerr << "[nfs-hp2-alpha] eFixUpTables solid"
+                              << " idx=" << std::dec << nodeCount
+                              << " node=0x" << std::hex << current
+                              << " next=0x" << readGuestU32Raw(rdram, current + 0x0u)
+                              << " stripCount=0x" << static_cast<uint32_t>(static_cast<uint16_t>(READ16(current + 0x34u)))
+                              << " texCount=0x" << static_cast<uint32_t>(static_cast<uint16_t>(READ16(current + 0xACu)))
+                              << " stripBase=0x" << readGuestU32Raw(rdram, current + 0xB0u)
+                              << " texBase=0x" << readGuestU32Raw(rdram, current + 0xB8u)
+                              << std::dec << std::endl;
+                }
+
+                current = readGuestU32Raw(rdram, current + 0x0u);
+                ++nodeCount;
+            }
+
+            std::cerr << "[nfs-hp2-alpha] eFixUpTables list"
+                      << " sentinel=0x" << std::hex << solidListSentinel
+                      << " head=0x" << solidListHead
+                      << " walked=0x" << nodeCount
+                      << " repeated=0x" << repeatedNode
+                      << " endedAt=0x" << current
+                      << std::dec << std::endl;
+            ++s_fixupDiagCount;
+        }
+
+        eFixUpTables__Fv_0x102f50(rdram, ctx, runtime);
+        if (ctx->pc == entryPc)
+        {
+            ctx->pc = entryPc;
+        }
+    }
+
+    void nfsHp2AlphaGetRenderTargetTextureInfo(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        if (!rdram || !ctx || !runtime)
+        {
+            if (runtime)
+            {
+                runtime->requestStop();
+            }
+            return;
+        }
+
+        const uint32_t entryPc = ctx->pc;
+        const uint32_t wantedTextureId = getRegU32(ctx, 4);
+
+        static uint32_t s_logCount = 0u;
+        if (s_logCount < 16u)
+        {
+            std::cerr << "[nfs-hp2-alpha] eGetRenderTargetTextureInfo:enter"
+                      << " wanted=0x" << std::hex << wantedTextureId
+                      << " ids=[";
+            for (uint32_t i = 0u; i < 13u; ++i)
+            {
+                const uint32_t renderTargetAddr = 0x0027ED80u + (i * 0x500u);
+                const uint32_t renderTargetIndex = readGuestU32Raw(rdram, renderTargetAddr + 0x0u);
+                const uint32_t textureInfoAddr = 0x00260270u + (renderTargetIndex * kTextureInfoStride);
+                const uint32_t textureId = readGuestU32Raw(rdram, textureInfoAddr + 0x20u);
+                if (i != 0u)
+                {
+                    std::cerr << ",";
+                }
+                std::cerr << "0x" << textureId;
+            }
+            std::cerr << "] ra=0x" << getRegU32(ctx, 31) << std::dec << std::endl;
+        }
+
+        eGetRenderTargetTextureInfo__Fi_0x104168(rdram, ctx, runtime);
+
+        if (s_logCount < 16u)
+        {
+            std::cerr << "[nfs-hp2-alpha] eGetRenderTargetTextureInfo:return"
+                      << " wanted=0x" << std::hex << wantedTextureId
+                      << " result=0x" << getRegU32(ctx, 2)
+                      << " pc=0x" << ctx->pc
+                      << std::dec << std::endl;
+            ++s_logCount;
+        }
+
+        if (ctx->pc == entryPc)
+        {
+            ctx->pc = entryPc;
+        }
+    }
+
     void applyNfsHp2AlphaOverrides(PS2Runtime &runtime)
     {
+        runtime.registerFunction(0x102F50u, &nfsHp2AlphaEFixUpTables);
+        runtime.registerFunction(0x104168u, &nfsHp2AlphaGetRenderTargetTextureInfo);
+        runtime.registerFunction(0x106860u, &nfsHp2AlphaAddTexturesSorted);
+        runtime.registerFunction(0x1094D0u, &nfsHp2AlphaReconnectAllModels);
+        runtime.registerFunction(0x109050u, &nfsHp2AlphaReconnectTextureTable);
         runtime.registerFunction(0x10F1B8u, &nfsHp2AlphaSkipDebugInitHelper);
+        runtime.registerFunction(0x11FC60u, &nfsHp2AlphaAfxUpdateTextures);
+        runtime.registerFunction(0x20CF50u, &nfsHp2AlphaLoadCommonRegion);
         runtime.registerFunction(0x10F380u, &nfsHp2AlphaSkipDebugInitHelper);
         runtime.registerFunction(0x1027B8u, &nfsHp2AlphaDownloadVuCode);
+        runtime.registerFunction(0x113670u, &nfsHp2AlphaGetLightMaterial);
         runtime.registerFunction(0x115618u, &nfsHp2AlphaCreateDepthIntoAlphaBuffer);
+        runtime.registerFunction(0x136F10u, &nfsHp2AlphaSortFlailerObjectList);
+        runtime.registerFunction(0x1F5680u, &nfsHp2AlphaSortBList);
+        runtime.registerFunction(0x140098u, &nfsHp2AlphaGenerateEventsFromScanners);
         runtime.registerFunction(0x140208u, &nfsHp2AlphaFindEventNode);
+        runtime.registerFunction(0x141678u, &nfsHp2AlphaFindScannerConfig);
+        runtime.registerFunction(0x149408u, &nfsHp2AlphaRenderCameraMovers);
+        runtime.registerFunction(0x149478u, &nfsHp2AlphaUpdateCameraMovers);
+        runtime.registerFunction(0x170B08u, &nfsHp2AlphaUpdateCameraCoordinators);
+        runtime.registerFunction(0x170B50u, &nfsHp2AlphaUpdateCameraCoordinatorsContinuation);
+        runtime.registerFunction(0x170B54u, &nfsHp2AlphaUpdateCameraCoordinatorsContinuation);
+        runtime.registerFunction(0x170B5Cu, &nfsHp2AlphaUpdateCameraCoordinatorsContinuation);
+        runtime.registerFunction(0x17C520u, &nfsHp2AlphaReconnectAllAnimations);
+        runtime.registerFunction(0x17CA70u, &nfsHp2AlphaFindAnimationSolid);
+        runtime.registerFunction(0x180650u, &nfsHp2AlphaGetTextureInfo);
+        runtime.registerFunction(0x180788u, &nfsHp2AlphaTexturePackCtor);
+        runtime.registerFunction(0x1808E0u, &nfsHp2AlphaAttachTextureTable);
+        runtime.registerFunction(0x180C18u, &nfsHp2AlphaLoadTextureTableFromFile);
         runtime.registerFunction(0x180B30u, &nfsHp2AlphaGetLoadedTexture);
+        runtime.registerFunction(0x185B60u, &nfsHp2AlphaNisManagerCtor);
+        runtime.registerFunction(0x185CF8u, &nfsHp2AlphaStartNisManager);
+        runtime.registerFunction(0x185EE0u, &nfsHp2AlphaLoadNisManager);
+        runtime.registerFunction(0x186228u, &nfsHp2AlphaStartAnimatingNisManager);
+        runtime.registerFunction(0x1864A0u, &nfsHp2AlphaRenderNisManager);
+        runtime.registerFunction(0x186718u, &nfsHp2AlphaDrawNisObjects);
+        runtime.registerFunction(0x20C760u, &nfsHp2AlphaBeginLoadSound);
+        runtime.registerFunction(0x217820u, &nfsHp2AlphaOpenBaseSpeaker);
         runtime.registerFunction(0x181D20u, &nfsHp2AlphaBeginReadQueuedFile);
         runtime.registerFunction(0x181E10u, &nfsHp2AlphaServiceQueuedFiles);
+        runtime.registerFunction(0x1F94D8u, &nfsHp2AlphaBOpen);
+        runtime.registerFunction(0x1FB360u, &nfsHp2AlphaOpenPlatformFile);
         runtime.registerFunction(0x1FA888u, &nfsHp2AlphaLoadDirectory);
         runtime.registerFunction(0x1FA548u, &nfsHp2AlphaTempDirectoryEntryCtor);
         runtime.registerFunction(0x1F8AE8u, &nfsHp2AlphaServiceFileSystem);
@@ -1862,7 +4723,24 @@ label_1fa834:
         runtime.registerFunction(0x1FA804u, &nfsHp2AlphaRecurseDirectoryContinuation);
         runtime.registerFunction(0x1FA834u, &nfsHp2AlphaRecurseDirectoryContinuation);
         std::cout << "[game_overrides] alpha registrations ready"
+                  << " eFixUpTables=0x102f50"
+                  << " eGetRenderTargetTextureInfo=0x104168"
+                  << " reconnectAllModels=0x1094d0"
+                  << " reconnectTextureTable=0x109050"
+                  << " afxUpdateTextures=0x11fc60"
+                  << " loadCommonRegion=0x20cf50"
+                  << " reconnectAllAnimations=0x17c520"
+                  << " findAnimationSolid=0x17ca70"
+                  << " getTextureInfo=0x180650"
+                  << " texturePackCtor=0x180788"
+                  << " attachTextureTable=0x1808e0"
+                  << " loadTextureTable=0x180c18"
                   << " getLoadedTexture=0x180b30"
+                  << " nisCtor=0x185b60"
+                  << " nisStart=0x185cf8"
+                  << " nisLoad=0x185ee0"
+                  << " nisStartAnimating=0x186228"
+                  << " drawNisObjects=0x186718"
                   << " serviceQueuedFiles=0x181e10"
                   << std::endl;
     }
