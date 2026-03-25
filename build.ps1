@@ -214,7 +214,14 @@ function Get-LatestWriteTime([string[]]$Paths, [string[]]$IncludePatterns = @("*
 }
 
 function Get-SmartBuildPlan([string]$BuildConfig) {
-    $runtimeLib = Join-Path $repoRoot "out\build\ps2xRuntime\$BuildConfig\ps2_runtime.lib"
+    $backend = Get-PreferredOutputBackend $OutputBackend
+    # Ninja builds use flat directories (no config subfolder), VS uses config subfolders
+    if ($backend -eq "ninja") {
+        $runtimeLib = Join-Path $repoRoot "out\build\ps2xRuntime\ps2_runtime.lib"
+    }
+    else {
+        $runtimeLib = Join-Path $repoRoot "out\build\ps2xRuntime\$BuildConfig\ps2_runtime.lib"
+    }
     $gameExe = Join-Path $repoRoot "output\$BuildConfig\ps2_game.exe"
 
     $runtimeSources = @(
@@ -290,7 +297,15 @@ function Assert-ArtifactExists([string]$Path, [string]$Label, [string]$LogPath =
 function Invoke-OutputBuild([string]$BuildConfig) {
     $backend = Get-PreferredOutputBackend $OutputBackend
     $outputBuildDir = Get-OutputBuildDir $backend $BuildConfig
-    $runtimeLib = Join-Path $repoRoot "out\build\ps2xRuntime\$BuildConfig\ps2_runtime.lib"
+    # Ninja builds use flat directories (no config subfolder), VS uses config subfolders
+    if ($backend -eq "ninja") {
+        $runtimeLib = Join-Path $repoRoot "out\build\ps2xRuntime\ps2_runtime.lib"
+        $raylibLib = Join-Path $repoRoot "out\build\_deps\raylib-build\raylib\raylib.lib"
+    }
+    else {
+        $runtimeLib = Join-Path $repoRoot "out\build\ps2xRuntime\$BuildConfig\ps2_runtime.lib"
+        $raylibLib = Join-Path $repoRoot "out\build\_deps\raylib-build\raylib\$BuildConfig\raylib.lib"
+    }
     $gameExe = Join-Path $repoRoot "output\$BuildConfig\ps2_game.exe"
     $gamePdb = Join-Path $repoRoot "output\$BuildConfig\ps2_game.pdb"
     $gameIlk = Join-Path $repoRoot "output\$BuildConfig\ps2_game.ilk"
@@ -347,6 +362,10 @@ function Invoke-OutputBuild([string]$BuildConfig) {
 }
 
 function Invoke-RuntimeAndOutputBuild([string]$BuildConfig) {
+    $backend = Get-PreferredOutputBackend $OutputBackend
+    if ($backend -eq "ninja") {
+        Ensure-CmakeConfigured "." "out\build" "Ninja" $BuildConfig
+    }
     $runtimeResult = Invoke-CmakeBuild "out\build" $BuildConfig "ps2_runtime"
     if ($runtimeResult.ExitCode -ne 0) {
         return $runtimeResult.ExitCode
@@ -356,6 +375,10 @@ function Invoke-RuntimeAndOutputBuild([string]$BuildConfig) {
 }
 
 function Invoke-RuntimeBuild([string]$BuildConfig) {
+    $backend = Get-PreferredOutputBackend $OutputBackend
+    if ($backend -eq "ninja") {
+        Ensure-CmakeConfigured "." "out\build" "Ninja" $BuildConfig
+    }
     $runtimeResult = Invoke-CmakeBuild "out\build" $BuildConfig "ps2_runtime"
     return $runtimeResult.ExitCode
 }
@@ -363,14 +386,18 @@ function Invoke-RuntimeBuild([string]$BuildConfig) {
 function Invoke-SmartBuild([string]$BuildConfig) {
     $plan = Get-SmartBuildPlan $BuildConfig
     $expectedGameExe = Join-Path $repoRoot "output\$BuildConfig\ps2_game.exe"
+    $backend = Get-PreferredOutputBackend $OutputBackend
 
     Write-Host "[smart] runtimeLatest=$($plan.RuntimeLatest.ToString('yyyy-MM-dd HH:mm:ss')) runtimeLib=$($plan.RuntimeLibTime.ToString('yyyy-MM-dd HH:mm:ss'))"
     Write-Host "[smart] outputLatest=$($plan.OutputLatest.ToString('yyyy-MM-dd HH:mm:ss')) gameExe=$($plan.GameExeTime.ToString('yyyy-MM-dd HH:mm:ss'))"
     Write-Host "[smart] decision=$($plan.Mode)"
-    Write-Host "[smart] output-backend=$(Get-PreferredOutputBackend $OutputBackend)"
+    Write-Host "[smart] output-backend=$backend"
 
     switch ($plan.Mode) {
         "runtime" {
+            if ($backend -eq "ninja") {
+                Ensure-CmakeConfigured "." "out\build" "Ninja" $BuildConfig
+            }
             return (Invoke-RuntimeAndOutputBuild $BuildConfig)
         }
         "output" {

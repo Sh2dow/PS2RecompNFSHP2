@@ -59,6 +59,20 @@ cmake -S . -B out/build
 cmake --build out/build --config Debug
 ```
 
+### Build app
+
+# First run or after changes
+./build.ps1 -recomp
+
+# Subsequent builds (C++ compilation only)
+./build.ps1
+
+# Force recompilation
+./build.ps1 -recomp -ForceRecomp
+
+# Cleanup
+./build.ps1 -clean
+
 ### Usage
 
 Preferred workflow for retail or stripped games:
@@ -188,3 +202,19 @@ Use Game Override modules when:
 * Uses ELFIO for ELF parsing
 * Uses toml11 for TOML parsing
 * Uses fmt for string formatting
+
+### There's a built-in keyboard-to-controller mapper:
+
+| PS2 Button              | Keyboard Key              |
+|-------------------------|---------------------------|
+| D-Pad Up/Down/Left/Right| Arrow keys                |
+| Square                  | Z                         |
+| Cross (A)               | X                         |
+| Circle                  | C                         |
+| Triangle                | V                         |
+| L1 / R1                 | Q / E                     |
+| L2 / R2                 | 1 / 3                     |
+| Start                   | Enter                     |
+| Select                  | Right Shift               |
+| L3 / R3                 | Left Ctrl / Right Ctrl    |
+| Analog Left             | WASD                      |

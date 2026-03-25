@@ -3597,7 +3597,7 @@ void sceSynthesizerChangePanpot(uint8_t *rdram, R5900Context *ctx, PS2Runtime *r
 
 void sceSynthesizerChangePartBendSens(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
 {
-    TODO_NAMED("sceSynthesizerChangePartBendSens", rdram, ctx, runtime);
+    setReturnU32(ctx, 0);
 }
 
 void sceSynthesizerChangePartExpression(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)

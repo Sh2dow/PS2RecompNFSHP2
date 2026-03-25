@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(PS2RecompiledGame)
+project(PS2RecompiledGame LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -26,6 +26,27 @@ include_directories("${PROJECT_ROOT}/out/_deps/fmt-src/include")
 
 # Add raylib include directory from the build output
 include_directories("${PROJECT_ROOT}/out/_deps/raylib-src/src")
+
+# Add Windows SDK and VC++ library paths for system libraries (must be before executable definition)
+if (MSVC)
+    # Get Windows SDK library paths
+    file(GLOB SDK_VERSIONS "C:/Program Files (x86)/Windows Kits/10/Lib/*")
+    list(SORT SDK_VERSIONS)
+    list(REVERSE SDK_VERSIONS)
+    list(GET SDK_VERSIONS 0 LATEST_SDK_VERSION)
+    string(REPLACE "\\" "/" WINDOWS_SDK_LIB_DIR "${LATEST_SDK_VERSION}")
+    
+    # Get VC++ library paths - use the latest MSVC version
+    set(VC_BASE "C:/Program Files (x86)/Microsoft Visual Studio/18/BuildTools/VC/Tools/MSVC")
+    file(GLOB VC_VERSIONS "${VC_BASE}/*")
+    list(SORT VC_VERSIONS)
+    list(REVERSE VC_VERSIONS)
+    list(GET VC_VERSIONS 0 VC_VERSION_PATH)
+    string(REPLACE "\\" "/" VC_LIB_DIR "${VC_VERSION_PATH}")
+    set(VC_LIB_DIR "${VC_LIB_DIR}/lib/x64")
+    
+    link_directories("${WINDOWS_SDK_LIB_DIR}/um/x64" "${WINDOWS_SDK_LIB_DIR}/ucrt/x64" "${VC_LIB_DIR}")
+endif()
 
 function(ps2_game_apply_common_settings target_name)
     target_include_directories(${target_name} PRIVATE
@@ -91,17 +112,25 @@ if (TARGET ps2_runtime)
         raylib
     )
 else()
-    target_link_libraries(ps2_game PRIVATE
-        "$<$<CONFIG:Debug>:${PROJECT_ROOT}/out/build/ps2xRuntime/Debug/ps2_runtime.lib>"
-        "$<$<CONFIG:Release>:${PROJECT_ROOT}/out/build/ps2xRuntime/Release/ps2_runtime.lib>"
-        "$<$<CONFIG:MinSizeRel>:${PROJECT_ROOT}/out/build/ps2xRuntime/MinSizeRel/ps2_runtime.lib>"
-        "$<$<CONFIG:RelWithDebInfo>:${PROJECT_ROOT}/out/build/ps2xRuntime/RelWithDebInfo/ps2_runtime.lib>"
+    # Ninja builds don't use config subdirectories, VS builds do
+    if (CMAKE_GENERATOR STREQUAL "Ninja")
+        target_link_libraries(ps2_game PRIVATE
+            "${PROJECT_ROOT}/out/build/ps2xRuntime/ps2_runtime.lib"
+            "${PROJECT_ROOT}/out/build/_deps/raylib-build/raylib/raylib.lib"
+        )
+    else()
+        target_link_libraries(ps2_game PRIVATE
+            "$<$<CONFIG:Debug>:${PROJECT_ROOT}/out/build/ps2xRuntime/Debug/ps2_runtime.lib>"
+            "$<$<CONFIG:Release>:${PROJECT_ROOT}/out/build/ps2xRuntime/Release/ps2_runtime.lib>"
+            "$<$<CONFIG:MinSizeRel>:${PROJECT_ROOT}/out/build/ps2xRuntime/MinSizeRel/ps2_runtime.lib>"
+            "$<$<CONFIG:RelWithDebInfo>:${PROJECT_ROOT}/out/build/ps2xRuntime/RelWithDebInfo/ps2_runtime.lib>"
 
-        "$<$<CONFIG:Debug>:${PROJECT_ROOT}/out/build/_deps/raylib-build/raylib/Debug/raylib.lib>"
-        "$<$<CONFIG:Release>:${PROJECT_ROOT}/out/build/_deps/raylib-build/raylib/Release/raylib.lib>"
-        "$<$<CONFIG:MinSizeRel>:${PROJECT_ROOT}/out/build/_deps/raylib-build/raylib/MinSizeRel/raylib.lib>"
-        "$<$<CONFIG:RelWithDebInfo>:${PROJECT_ROOT}/out/build/_deps/raylib-build/raylib/RelWithDebInfo/raylib.lib>"
-    )
+            "$<$<CONFIG:Debug>:${PROJECT_ROOT}/out/build/_deps/raylib-build/raylib/Debug/raylib.lib>"
+            "$<$<CONFIG:Release>:${PROJECT_ROOT}/out/build/_deps/raylib-build/raylib/Release/raylib.lib>"
+            "$<$<CONFIG:MinSizeRel>:${PROJECT_ROOT}/out/build/_deps/raylib-build/raylib/MinSizeRel/raylib.lib>"
+            "$<$<CONFIG:RelWithDebInfo>:${PROJECT_ROOT}/out/build/_deps/raylib-build/raylib/RelWithDebInfo/raylib.lib>"
+        )
+    endif()
 endif()
 
 target_link_libraries(ps2_game PRIVATE

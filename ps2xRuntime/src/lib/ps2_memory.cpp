@@ -174,6 +174,19 @@ bool PS2Memory::initialize(size_t ramSize)
         m_rdram = new uint8_t[ramSize];
         std::memset(m_rdram, 0, ramSize);
 
+        // Initialize sound status addresses to avoid 0xAAAAAAAA stuck state
+        constexpr uint32_t kSndTransTypeAddr = 0x01E0E1C0u;
+        constexpr uint32_t kSndTransBankAddr = 0x01E0E1C8u;
+        constexpr uint32_t kSndTransLevelAddr = 0x01E0E1B8u;
+        constexpr uint32_t kSndGetAdrsAddr = 0x01E212D8u;
+        constexpr uint32_t kSndStatusMirrorAddr = 0x01E213C0u;
+        
+        *reinterpret_cast<uint32_t*>(m_rdram + (kSndTransTypeAddr & PS2_RAM_MASK)) = 0;
+        *reinterpret_cast<uint32_t*>(m_rdram + (kSndTransBankAddr & PS2_RAM_MASK)) = 0;
+        *reinterpret_cast<uint32_t*>(m_rdram + (kSndTransLevelAddr & PS2_RAM_MASK)) = 0;
+        *reinterpret_cast<uint32_t*>(m_rdram + (kSndGetAdrsAddr & PS2_RAM_MASK)) = 0;
+        *reinterpret_cast<uint32_t*>(m_rdram + (kSndStatusMirrorAddr & PS2_RAM_MASK)) = 0;
+
         // Allocate scratchpad
         m_scratchpad = new uint8_t[PS2_SCRATCHPAD_SIZE];
         std::memset(m_scratchpad, 0, PS2_SCRATCHPAD_SIZE);
