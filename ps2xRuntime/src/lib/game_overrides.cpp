@@ -46,7 +46,9 @@ void StartAnimating__10NisManager_0x186228(uint8_t *rdram, R5900Context *ctx, PS
 void Render__10NisManagerP5eView_0x1864a0(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime);
 void DrawNisObjects__FP5eView_0x186718(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime);
 void bOpen__FPCci_0x1f94d8(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime);
+void bOpen__FPCc_0x1f9590(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime);
 void OpenPlatformFile__FPCc_0x1fb360(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime);
+void InitFile__Q22M211MoviePlayerPCc_0x1eee08(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime);
 void AddTail__t6bTList1Z14eActiveTextureP5bList_0x111738(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime);
 void Sort__5bListPFP5bNodeP5bNode_i_0x1f5680(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime);
 void BeginLoad__6bSoundPcT1_0x20c760(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime);
@@ -2207,11 +2209,27 @@ label_1fa834:
         {
             return readLeU32(rdram + (addr & PS2_RAM_MASK));
         };
+        const auto writeGuestU32 = [&](uint32_t addr, uint32_t value)
+        {
+            writeLeU32(rdram + (addr & PS2_RAM_MASK), value);
+        };
 
         uint32_t node = readGuestU32(sentinel + 0u);
-        if (node == sentinel)
+        
+        if (node == sentinel || node == 0u)
         {
-            setReturnU32(ctx, 0u);
+            static uint32_t s_syntheticNodeAddr = 0u;
+            if (s_syntheticNodeAddr == 0u)
+            {
+                s_syntheticNodeAddr = 0x2a2000u;
+                writeGuestU32(s_syntheticNodeAddr + 0u, s_syntheticNodeAddr);
+                writeGuestU32(s_syntheticNodeAddr + 4u, s_syntheticNodeAddr);
+                writeGuestU32(s_syntheticNodeAddr + 8u, wantedEvent);
+                writeGuestU32(s_syntheticNodeAddr + 0x10u, 0u);
+                writeGuestU32(s_syntheticNodeAddr + 0x14u, 0u);
+                std::cerr << "[nfs-hp2-alpha] created synthetic keyboard event node addr=0x" << std::hex << s_syntheticNodeAddr << " event=" << wantedEvent << std::dec << std::endl;
+            }
+            setReturnU32(ctx, s_syntheticNodeAddr);
             ctx->pc = getRegU32(ctx, 31);
             return;
         }
@@ -2379,7 +2397,11 @@ label_1fa834:
         }
 
         const uint32_t joystickAddr = getRegU32(ctx, 4);
-        const uint32_t requestedConfig = getRegU32(ctx, 5);
+        uint32_t requestedConfig = getRegU32(ctx, 5);
+        if (requestedConfig == 0xFFFFFFFFu)
+        {
+            requestedConfig = 0u;
+        }
         const auto readGuestU32 = [&](uint32_t addr) -> uint32_t
         {
             return readLeU32(rdram + (addr & PS2_RAM_MASK));
@@ -2845,12 +2867,33 @@ label_1fa834:
         uint32_t current = readGuestU32Raw(rdram, sentinel + 0x0u);
         uint32_t resultAddr = 0u;
 
+        static uint32_t s_walkLogCount = 0u;
+        uint32_t walkLimit = 3u;
+
         for (uint32_t walked = 0u; current != 0u && current != sentinel && walked < 0x200u; ++walked)
         {
             if (current >= kPs2RdramSize)
             {
+                if (s_walkLogCount < 8u)
+                {
+                    std::cerr << "[nfs-hp2-alpha] GetTextureInfo walk invalid addr=0x" << std::hex << current << std::dec << std::endl;
+                    ++s_walkLogCount;
+                }
                 break;
             }
+
+            const uint32_t nextNode = readGuestU32Raw(rdram, current + 0x0u);
+            const uint32_t tableAddr = readGuestU32Raw(rdram, current + 0x60u);
+            const uint32_t entryCount = readGuestU32Raw(rdram, current + 0x64u);
+
+            if (s_walkLogCount < 8u && walked < walkLimit)
+            {
+                std::cerr << "[nfs-hp2-alpha] GetTextureInfo walk pack=0x" << std::hex << current
+                          << " next=0x" << nextNode << " table=0x" << tableAddr
+                          << " count=0x" << entryCount << " wanted=0x" << wantedTextureId << std::dec << std::endl;
+                ++s_walkLogCount;
+            }
+
             if (!tryLookupLoadedTextureFast(rdram, current, wantedTextureId, resultAddr))
             {
                 break;
@@ -2861,7 +2904,52 @@ label_1fa834:
                 ctx->pc = entryPc;
                 return;
             }
-            current = readGuestU32Raw(rdram, current + 0x0u);
+            current = nextNode;
+        }
+
+        static uint32_t s_fallbackReachCount = 0u;
+        if (s_fallbackReachCount < 4u)
+        {
+            std::cerr << "[nfs-hp2-alpha] GetTextureInfo fallback-reached wanted=0x" << std::hex << wantedTextureId << std::dec << std::endl;
+            ++s_fallbackReachCount;
+        }
+
+        static const std::array<uint32_t, 3> kKnownTexturePacks = {{
+            0x1bbcd00u,  // DYNTEX
+            0x1a3d0a0u,  // HUDTEX
+            0x18f3560u,   // CARS
+        }};
+
+        for (const uint32_t packAddr : kKnownTexturePacks)
+        {
+            if (packAddr == current)
+            {
+                continue;
+            }
+            if (!tryLookupLoadedTextureFast(rdram, packAddr, wantedTextureId, resultAddr))
+            {
+                static uint32_t s_fallbackSkipCount = 0u;
+                if (s_fallbackSkipCount < 8u)
+                {
+                    std::cerr << "[nfs-hp2-alpha] GetTextureInfo fallback-skip pack=0x" << std::hex << packAddr
+                              << " wanted=0x" << wantedTextureId << std::dec << std::endl;
+                    ++s_fallbackSkipCount;
+                }
+                continue;
+            }
+            if (resultAddr != 0u)
+            {
+                static uint32_t s_fallbackHitCount = 0u;
+                if (s_fallbackHitCount < 8u)
+                {
+                    std::cerr << "[nfs-hp2-alpha] GetTextureInfo fallback-hit pack=0x" << std::hex << packAddr
+                              << " wanted=0x" << wantedTextureId << " found=0x" << resultAddr << std::dec << std::endl;
+                    ++s_fallbackHitCount;
+                }
+                setReturnU32(ctx, resultAddr);
+                ctx->pc = entryPc;
+                return;
+            }
         }
 
         for (uint32_t i = 0u; i < 13u; ++i)
@@ -2886,6 +2974,14 @@ label_1fa834:
                       << " sentinel=0x" << sentinel
                       << std::dec << std::endl;
             ++s_missLogCount;
+        }
+
+        uint32_t fallbackTexture = 0u;
+        if (tryLookupLoadedTextureFast(rdram, 0x1bbcd00u, 0xABCDEF01u, fallbackTexture) && fallbackTexture != 0u)
+        {
+            setReturnU32(ctx, fallbackTexture);
+            ctx->pc = entryPc;
+            return;
         }
 
         setReturnU32(ctx, 0u);
@@ -4012,12 +4108,81 @@ label_1fa834:
         }
     }
 
+    void nfsHp2AlphaBOpenSingleArg(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        static uint32_t s_logCount = 0u;
+        if (s_logCount < 8u)
+        {
+            const uint32_t pathAddr = getRegU32(ctx, 4);
+            const uint32_t ra = getRegU32(ctx, 31);
+            std::cerr << "[nfs-hp2-alpha] bOpen__FPCc entry path=0x" << std::hex << pathAddr << " ra=0x" << ra << std::dec << std::endl;
+            ++s_logCount;
+        }
+        bOpen__FPCc_0x1f9590(rdram, ctx, runtime);
+    }
+
+    void nfsHp2AlphaInitMoviePlayerFile(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        const uint32_t entryPc = ctx->pc;
+        const uint32_t thisAddr = getRegU32(ctx, 4);
+        const uint32_t pathAddr = getRegU32(ctx, 5);
+
+        static uint32_t s_logCount = 0u;
+        if (s_logCount < 8u)
+        {
+            std::cerr << "[nfs-hp2-alpha] InitMoviePlayerFile this=0x" << std::hex << thisAddr
+                      << " path=0x" << pathAddr << " ra=0x" << getRegU32(ctx, 31) << std::dec << std::endl;
+            ++s_logCount;
+        }
+
+        if (pathAddr == 0u || pathAddr == 0xAAAAAAAAu || pathAddr == 0xEEEEEEEEu || pathAddr == 0x44444444u)
+        {
+            SET_GPR_U32(ctx, 2, 0u);
+            ctx->pc = getRegU32(ctx, 31);
+            return;
+        }
+
+        InitFile__Q22M211MoviePlayerPCc_0x1eee08(rdram, ctx, runtime);
+        if (ctx->pc == entryPc)
+        {
+            ctx->pc = entryPc;
+        }
+    }
+
     void nfsHp2AlphaBOpen(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     {
         const uint32_t entryPc = ctx->pc;
         const uint32_t pathAddr = getRegU32(ctx, 4);
         const uint32_t openFlags = getRegU32(ctx, 5);
         const uint32_t returnAddr = getRegU32(ctx, 31);
+        const uint32_t gp = getRegU32(ctx, 28);
+
+        if (pathAddr == 0u || pathAddr == 0xAAAAAAAAu || pathAddr == 0xEEEEEEEEu || pathAddr == 0x44444444u)
+        {
+            const uint32_t currentSp = getRegU32(ctx, 29);
+            const uint32_t callerRa = readGuestU32Raw(rdram, currentSp + 0x30u);
+            const uint32_t callerCallerRa = readGuestU32Raw(rdram, currentSp + 0x50u);
+            static uint32_t s_badPathCount = 0u;
+            if (s_badPathCount < 8u)
+            {
+                std::cerr << "[nfs-hp2-alpha] bOpen:rejected-bad-path pathAddr=0x" << std::hex << pathAddr
+                          << " ra=0x" << returnAddr << " callerRa=0x" << callerRa << " callerCallerRa=0x" << callerCallerRa
+                          << " sp=0x" << currentSp << " gp=0x" << gp << " entryPc=0x" << entryPc << std::dec << std::endl;
+                std::cerr << "  stack dump around sp+0x20:";
+                for (int i = -4; i <= 4; i++)
+                {
+                    uint32_t offset = static_cast<uint32_t>(i * 4);
+                    uint32_t val = readGuestU32Raw(rdram, currentSp + offset + 0x20u);
+                    std::cerr << " " << std::hex << "@" << (currentSp + offset + 0x20u) << "=" << val;
+                }
+                std::cerr << std::dec << std::endl;
+                ++s_badPathCount;
+            }
+            SET_GPR_U32(ctx, 2, 0u);
+            ctx->pc = returnAddr;
+            return;
+        }
+
         const uint32_t currentSp = getRegU32(ctx, 29);
         const uint32_t wrapperCallerRa = readGuestU32Raw(rdram, currentSp + 0x30u);
         std::string sourcePath = readGuestCStringRaw(rdram, pathAddr, 0x100u);
@@ -4670,8 +4835,48 @@ label_1fa834:
         }
     }
 
+    void nfsHp2AlphaPadReadOverride(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        if (!rdram || !ctx)
+        {
+            return;
+        }
+
+        const int port = static_cast<int>(getRegU32(ctx, 4));
+        const int slot = static_cast<int>(getRegU32(ctx, 5));
+        const uint32_t dataAddr = getRegU32(ctx, 6);
+        uint8_t *data = getMemPtr(rdram, dataAddr);
+
+        static uint32_t s_callCount = 0;
+        if (data && port == 0 && slot == 0)
+        {
+            std::memset(data, 0, 32);
+            data[1] = 7;
+            data[2] = 0x00;
+            data[3] = 0x00;
+            data[4] = 0x80;
+            data[5] = 0x80;
+            data[6] = 0x80;
+            data[7] = 0x80;
+
+            ++s_callCount;
+            if ((s_callCount % 120) == 0)
+            {
+                std::cerr << "[nfs-hp2-alpha] PadReadOverride: all buttons pressed count=" << s_callCount << std::endl;
+            }
+
+            setReturnS32(ctx, 1);
+            ctx->pc = getRegU32(ctx, 31);
+            return;
+        }
+
+        ps2_stubs::scePadRead(rdram, ctx, runtime);
+    }
+
     void applyNfsHp2AlphaOverrides(PS2Runtime &runtime)
     {
+        runtime.registerFunction(0x21B198u, &nfsHp2AlphaPadReadOverride);
+        std::cerr << "[nfs-hp2-alpha] pad override registered" << std::endl;
         runtime.registerFunction(0x102F50u, &nfsHp2AlphaEFixUpTables);
         runtime.registerFunction(0x104168u, &nfsHp2AlphaGetRenderTargetTextureInfo);
         runtime.registerFunction(0x106860u, &nfsHp2AlphaAddTexturesSorted);
@@ -4713,6 +4918,8 @@ label_1fa834:
         runtime.registerFunction(0x181D20u, &nfsHp2AlphaBeginReadQueuedFile);
         runtime.registerFunction(0x181E10u, &nfsHp2AlphaServiceQueuedFiles);
         runtime.registerFunction(0x1F94D8u, &nfsHp2AlphaBOpen);
+        runtime.registerFunction(0x1F9590u, &nfsHp2AlphaBOpenSingleArg);
+        runtime.registerFunction(0x1EEE08u, &nfsHp2AlphaInitMoviePlayerFile);
         runtime.registerFunction(0x1FB360u, &nfsHp2AlphaOpenPlatformFile);
         runtime.registerFunction(0x1FA888u, &nfsHp2AlphaLoadDirectory);
         runtime.registerFunction(0x1FA548u, &nfsHp2AlphaTempDirectoryEntryCtor);

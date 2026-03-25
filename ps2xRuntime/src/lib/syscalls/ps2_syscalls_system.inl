@@ -166,6 +166,20 @@ void sceSifLoadElfPart(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
 
 void sceSifLoadModule(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
 {
+    const uint32_t pathAddr = getRegU32(ctx, 4); // $a0
+    const std::string modulePath = readGuestCStringBounded(rdram, pathAddr, kMaxSifModulePathBytes);
+    
+    static uint32_t s_loadModuleCallCount = 0u;
+    const uint32_t callIndex = ++s_loadModuleCallCount;
+    if (callIndex <= 32u)
+    {
+        std::cout << "[sceSifLoadModule] call=" << callIndex
+                  << " pathAddr=0x" << std::hex << pathAddr << std::dec
+                  << " path=\"" << modulePath << "\""
+                  << " pc=0x" << std::hex << ctx->pc << std::dec
+                  << std::endl;
+    }
+    
     // Use the same tracker as SifLoadModule so both APIs return the same module IDs.
     SifLoadModule(rdram, ctx, runtime);
 }

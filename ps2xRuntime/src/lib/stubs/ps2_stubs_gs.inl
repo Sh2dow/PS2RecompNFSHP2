@@ -354,6 +354,24 @@ void sceGsPutDrawEnv(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     setReturnS32(ctx, 0);
 }
 
+void sceGsPutIMR(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+{
+    // IMR (Interrupt Mask Register) - stubbed as no-op
+    // PS2 GS interrupt masking not emulated
+    (void)rdram;
+    (void)ctx;
+    (void)runtime;
+    setReturnS32(ctx, 0);
+}
+
+void sceGsGetIMR(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+{
+    // IMR (Interrupt Mask Register) - return 0 (no interrupts masked)
+    (void)rdram;
+    (void)runtime;
+    setReturnU32(ctx, 0);
+}
+
 void sceGsResetGraph(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
 {
     uint32_t mode = getRegU32(ctx, 4);

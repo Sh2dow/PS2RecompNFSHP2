@@ -468,6 +468,21 @@ void SifCallRpc(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
         }
     }
 
+    // Stub for SDRDRV (Sound Driver) RPC calls - sid typically 0x46d046d
+    // These RPCs would normally go to the IOP sound driver, but we stub them to return success
+    if (sid == 0x46d046du && !handled)
+    {
+        // RPC 0x6: Initialize/Query sound driver - return success
+        // RPC 0x7: Transfer sound data - return success
+        // Zero the receive buffer and return success
+        if (recvBuf && recvSize > 0)
+        {
+            rpcZeroRdram(rdram, recvBuf, recvSize);
+        }
+        handled = true;
+        resultPtr = recvBuf;
+    }
+
     if (!handled && sid == kDtxRpcSid)
     {
         if (rpcNum == 2 && recvBuf && recvSize >= sizeof(uint32_t))
